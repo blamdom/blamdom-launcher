@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <ui version="4.0">
- <class>FtbPage</class>
- <widget class="QWidget" name="FtbPage">
+ <class>BlamdomPage</class>
+ <widget class="QWidget" name="BlamdomPage">
   <property name="geometry">
    <rect>
     <x>0</x>
@@ -10,39 +10,26 @@
     <height>745</height>
    </rect>
   </property>
-  <layout class="QGridLayout" name="gridLayout">
-   <item row="3" column="0" colspan="2">
-    <layout class="QGridLayout" name="gridLayout_4" columnstretch="0,0,0" rowminimumheight="0" columnminimumwidth="0,0,0">
-     <item row="0" column="2">
-      <widget class="QComboBox" name="versionSelectionBox"/>
-     </item>
-     <item row="0" column="1">
-      <widget class="QLabel" name="label">
-       <property name="text">
-        <string>Version selected:</string>
-       </property>
-       <property name="alignment">
-        <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
-       </property>
-      </widget>
-     </item>
-     <item row="0" column="0">
-      <widget class="QComboBox" name="sortByBox"/>
-     </item>
-    </layout>
+  <layout class="QVBoxLayout" name="mainLayout">
+   <item>
+    <widget class="QLabel" name="headerLabel">
+     <property name="text">
+      <string>Blamdom packs — built by us, hosted by us, no middlemen.</string>
+     </property>
+    </widget>
    </item>
-   <item row="1" column="0">
+   <item>
     <widget class="QLineEdit" name="searchEdit">
      <property name="placeholderText">
-      <string>Search and filter...</string>
+      <string>Search packs...</string>
      </property>
      <property name="clearButtonEnabled">
       <bool>true</bool>
      </property>
     </widget>
    </item>
-   <item row="2" column="0" colspan="2">
-    <layout class="QGridLayout" name="gridLayout_3">
+   <item>
+    <layout class="QGridLayout" name="packGrid">
      <item row="0" column="0">
       <widget class="QTreeView" name="packView">
        <property name="alternatingRowColors">
@@ -56,6 +43,9 @@
        </property>
        <property name="verticalScrollMode">
         <enum>QAbstractItemView::ScrollPerPixel</enum>
+       </property>
+       <property name="rootIsDecorated">
+        <bool>false</bool>
        </property>
       </widget>
      </item>
@@ -71,10 +61,22 @@
      </item>
     </layout>
    </item>
-   <item row="0" column="0">
-    <widget class="QLabel" name="label_2">
+   <item>
+    <widget class="QLabel" name="modsHeader">
      <property name="text">
-      <string>Note: Many recent FTB modpacks are also available from CurseForge!</string>
+      <string>Our mods (shipped in the packs, available standalone)</string>
+     </property>
+     <property name="font">
+      <font>
+       <bold>true</bold>
+      </font>
+     </property>
+    </widget>
+   </item>
+   <item>
+    <widget class="QTextBrowser" name="modsText">
+     <property name="openExternalLinks">
+      <bool>true</bool>
      </property>
     </widget>
    </item>
@@ -89,7 +91,7 @@
  </customwidgets>
  <tabstops>
   <tabstop>searchEdit</tabstop>
-  <tabstop>versionSelectionBox</tabstop>
+  <tabstop>packView</tabstop>
  </tabstops>
  <resources/>
  <connections/>

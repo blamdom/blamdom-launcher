@@ -19,6 +19,9 @@
         <!-- Modrinth logo icon -->
         <file>scalable/instances/modrinth.svg</file>
 
+        <!-- Blamdom logo icon (grass block) -->
+        <file>scalable/instances/blamdom.svg</file>
+
         <!-- A proxy icon. Our own. SSSsss -->
         <file>scalable/proxy.svg</file>
 

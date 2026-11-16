@@ -494,27 +494,9 @@ set(API_SOURCES
 
     modplatform/helpers/ExportToModList.h
     modplatform/helpers/ExportToModList.cpp
-)
 
-set(FTB_SOURCES
-    modplatform/legacy_ftb/PackFetchTask.h
-    modplatform/legacy_ftb/PackFetchTask.cpp
-    modplatform/legacy_ftb/PackInstallTask.h
-    modplatform/legacy_ftb/PackInstallTask.cpp
-    modplatform/legacy_ftb/PrivatePackManager.h
-    modplatform/legacy_ftb/PrivatePackManager.cpp
-
-    modplatform/legacy_ftb/PackHelpers.h
-
-    modplatform/import_ftb/PackInstallTask.h
-    modplatform/import_ftb/PackInstallTask.cpp
-    modplatform/import_ftb/PackHelpers.h
-    modplatform/import_ftb/PackHelpers.cpp
-
-    modplatform/ftb/FTBPackInstallTask.h
-    modplatform/ftb/FTBPackInstallTask.cpp
-    modplatform/ftb/FTBPackManifest.h
-    modplatform/ftb/FTBPackManifest.cpp
+    modplatform/blamdom/BlamdomAPI.h
+    modplatform/blamdom/BlamdomAPI.cpp
 )
 
 set(FLAME_SOURCES
@@ -753,7 +735,6 @@ set(LOGIC_SOURCES
     ${META_SOURCES}
     ${ICONS_SOURCES}
     ${API_SOURCES}
-    ${FTB_SOURCES}
     ${FLAME_SOURCES}
     ${MODRINTH_SOURCES}
     ${PACKWIZ_SOURCES}
@@ -981,22 +962,8 @@ SET(LAUNCHER_SOURCES
     ui/pages/modplatform/atlauncher/AtlUserInteractionSupportImpl.cpp
     ui/pages/modplatform/atlauncher/AtlUserInteractionSupportImpl.h
 
-    ui/pages/modplatform/ftb/FtbFilterModel.cpp
-    ui/pages/modplatform/ftb/FtbFilterModel.h
-    ui/pages/modplatform/ftb/FtbListModel.cpp
-    ui/pages/modplatform/ftb/FtbListModel.h
-    ui/pages/modplatform/ftb/FtbPage.cpp
-    ui/pages/modplatform/ftb/FtbPage.h
-
-    ui/pages/modplatform/legacy_ftb/Page.cpp
-    ui/pages/modplatform/legacy_ftb/Page.h
-    ui/pages/modplatform/legacy_ftb/ListModel.h
-    ui/pages/modplatform/legacy_ftb/ListModel.cpp
-
-    ui/pages/modplatform/import_ftb/ImportFTBPage.cpp
-    ui/pages/modplatform/import_ftb/ImportFTBPage.h
-    ui/pages/modplatform/import_ftb/ListModel.h
-    ui/pages/modplatform/import_ftb/ListModel.cpp
+    ui/pages/modplatform/blamdom/BlamdomPage.cpp
+    ui/pages/modplatform/blamdom/BlamdomPage.h
 
     ui/pages/modplatform/flame/FlameModel.cpp
     ui/pages/modplatform/flame/FlameModel.h

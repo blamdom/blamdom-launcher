@@ -911,9 +911,6 @@ Application::Application(int& argc, char** argv) : QApplication(argc, argv)
         m_settings->registerSetting("ModrinthToken", "");
         m_settings->registerSetting("UserAgentOverride", "");
 
-        // FTBApp instances
-        m_settings->registerSetting("FTBAppInstancesPath", "");
-
         // Custom Technic Client ID
         m_settings->registerSetting("TechnicClientID", "");
 
@@ -1036,7 +1033,6 @@ Application::Application(int& argc, char** argv) : QApplication(argc, argv)
         m_metacache->addBase("fmllibs", QDir("mods/minecraftforge/libs").absolutePath());
         m_metacache->addBase("general", QDir("cache").absolutePath());
         m_metacache->addBase("ATLauncherPacks", QDir("cache/ATLauncherPacks").absolutePath());
-        m_metacache->addBase("FTBPacks", QDir("cache/FTBPacks").absolutePath());
         m_metacache->addBase("TechnicPacks", QDir("cache/TechnicPacks").absolutePath());
         m_metacache->addBase("FlamePacks", QDir("cache/FlamePacks").absolutePath());
         m_metacache->addBase("FlameMods", QDir("cache/FlameMods").absolutePath());
