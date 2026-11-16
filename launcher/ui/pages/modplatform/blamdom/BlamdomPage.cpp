@@ -140,7 +140,7 @@ void BlamdomPage::modsLoaded(QByteArray* response)
     for (const auto& m : m_mods) {
         html += QStringLiteral("<p><b>%1</b> — v%2 (%3)</p><p>%4<br>")
                     .arg(m.name.toHtmlEscaped(), m.version.toHtmlEscaped(),
-                         m.minecraft + " " + m.loader + ", " + m.side.toHtmlEscaped(),
+                         (m.minecraft + " " + m.loader + ", " + m.side).toHtmlEscaped(),
                          m.description.toHtmlEscaped());
         html += QStringLiteral("<a href=\"%1\">%2</a> · %3</p><hr>")
                     .arg(m.download, tr("download"), QString::fromUtf8(humanSize(m.sizeBytes)));
