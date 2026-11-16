@@ -139,9 +139,9 @@ void BlamdomPage::modsLoaded(QByteArray* response)
     QString html;
     for (const auto& m : m_mods) {
         html += QStringLiteral("<p><b>%1</b> — v%2 (%3)</p><p>%4<br>")
-                    .arg(Qt::toHtmlEscaped(m.name), Qt::toHtmlEscaped(m.version),
-                         Qt::toHtmlEscaped(m.minecraft + " " + m.loader + ", " + m.side),
-                         Qt::toHtmlEscaped(m.description));
+                    .arg(m.name.toHtmlEscaped(), m.version.toHtmlEscaped(),
+                         m.minecraft + " " + m.loader + ", " + m.side.toHtmlEscaped(),
+                         m.description.toHtmlEscaped());
         html += QStringLiteral("<a href=\"%1\">%2</a> · %3</p><hr>")
                     .arg(m.download, tr("download"), QString::fromUtf8(humanSize(m.sizeBytes)));
     }
@@ -152,7 +152,7 @@ void BlamdomPage::requestFailed(const QString& reason)
 {
     m_packsJob.reset();
     m_ui->packDescription->setHtml(tr("<p><b>%1</b></p><p>Packs will appear here as soon as the manifest is reachable.</p>")
-                                       .arg(Qt::toHtmlEscaped(reason)));
+                                       .arg(reason.toHtmlEscaped()));
 }
 
 void BlamdomPage::onSearchChanged()
@@ -206,11 +206,11 @@ void BlamdomPage::onSelectionChanged()
             "<p>%5</p>"
             "<p><b>Size</b>: %6 · <b>Released</b>: %7</p>"
             "<p><b>sha256</b>: <code>%8</code></p>")
-            .arg(Qt::toHtmlEscaped(m_selected.name), Qt::toHtmlEscaped(m_selected.version),
-                 Qt::toHtmlEscaped(m_selected.minecraft), Qt::toHtmlEscaped(m_selected.loader),
-                 Qt::toHtmlEscaped(m_selected.description),
-                 QString::fromUtf8(humanSize(m_selected.sizeBytes)), Qt::toHtmlEscaped(m_selected.released),
-                 Qt::toHtmlEscaped(m_selected.sha256)));
+            .arg(m_selected.name.toHtmlEscaped(), m_selected.version.toHtmlEscaped(),
+                 m_selected.minecraft.toHtmlEscaped(), m_selected.loader.toHtmlEscaped(),
+                 m_selected.description.toHtmlEscaped(),
+                 QString::fromUtf8(humanSize(m_selected.sizeBytes)), m_selected.released.toHtmlEscaped(),
+                 m_selected.sha256.toHtmlEscaped()));
     }
 
     suggestCurrent();
