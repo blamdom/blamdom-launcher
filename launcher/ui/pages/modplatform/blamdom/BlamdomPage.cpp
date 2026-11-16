@@ -96,7 +96,7 @@ void BlamdomPage::refresh()
 
     m_ui->packDescription->setHtml(tr("<p>Loading packs from <b>mine.blamdom.dev</b>…</p>"));
 
-    auto [packsJob, packsResponse] = BlamdomAPI::fetchPacks();
+    auto [packsJob, packsResponse] = Blamdom::BlamdomAPI::fetchPacks();
     QObject::connect(packsJob.get(), &NetJob::succeeded, this,
                      [this, packsResponse](bool ok) { if (ok) packsLoaded(packsResponse); });
     QObject::connect(packsJob.get(), &NetJob::failed, this, [this](const QString& reason) {
@@ -105,7 +105,7 @@ void BlamdomPage::refresh()
     m_packsJob = packsJob;
     m_packsJob->start();
 
-    auto [modsJob, modsResponse] = BlamdomAPI::fetchMods();
+    auto [modsJob, modsResponse] = Blamdom::BlamdomAPI::fetchMods();
     QObject::connect(modsJob.get(), &NetJob::succeeded, this,
                      [this, modsResponse](bool ok) { if (ok) modsLoaded(modsResponse); });
     QObject::connect(modsJob.get(), &NetJob::failed, this, [this](const QString& reason) {
@@ -118,7 +118,7 @@ void BlamdomPage::refresh()
 void BlamdomPage::packsLoaded(QByteArray* response)
 {
     m_packsJob.reset();
-    m_packs = BlamdomAPI::parsePacks(std::move(*response));
+    m_packs = Blamdom::BlamdomAPI::parsePacks(std::move(*response));
     m_loaded = true;
     applyFilter();
     if (m_packs.isEmpty()) {
@@ -129,7 +129,7 @@ void BlamdomPage::packsLoaded(QByteArray* response)
 void BlamdomPage::modsLoaded(QByteArray* response)
 {
     m_modsJob.reset();
-    m_mods = BlamdomAPI::parseMods(std::move(*response));
+    m_mods = Blamdom::BlamdomAPI::parseMods(std::move(*response));
 
     if (m_mods.isEmpty()) {
         m_ui->modsText->setHtml(tr("<p>No mods published yet.</p>"));
