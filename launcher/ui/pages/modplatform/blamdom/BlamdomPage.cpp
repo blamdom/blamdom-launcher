@@ -98,7 +98,7 @@ void BlamdomPage::refresh()
 
     auto [packsJob, packsResponse] = Blamdom::BlamdomAPI::fetchPacks();
     QObject::connect(packsJob.get(), &NetJob::succeeded, this,
-                     [this, packsResponse](bool ok) { if (ok) packsLoaded(packsResponse); });
+                     [this, packsResponse] { packsLoaded(packsResponse); });
     QObject::connect(packsJob.get(), &NetJob::failed, this, [this](const QString& reason) {
         requestFailed(tr("Failed to load packs: %1").arg(reason));
     });
@@ -107,7 +107,7 @@ void BlamdomPage::refresh()
 
     auto [modsJob, modsResponse] = Blamdom::BlamdomAPI::fetchMods();
     QObject::connect(modsJob.get(), &NetJob::succeeded, this,
-                     [this, modsResponse](bool ok) { if (ok) modsLoaded(modsResponse); });
+                     [this, modsResponse] { modsLoaded(modsResponse); });
     QObject::connect(modsJob.get(), &NetJob::failed, this, [this](const QString& reason) {
         qDebug() << "Blamdom: mods manifest failed:" << reason;
     });
