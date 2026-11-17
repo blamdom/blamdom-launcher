@@ -1,3 +1,16 @@
+> ## ⚠️ This is the **Blamdom Launcher** — a fork of Prism Launcher
+>
+> Maintained by the Blamdom crew for our own modpacks, mods and server.
+> **Not affiliated with or endorsed by the Prism Launcher project** (<https://prismlauncher.org>).
+>
+> Per the upstream forking policy: Prism's API keys are removed from `CMakeLists.txt`
+> (Imgur / Microsoft / CurseForge integrations disabled), and this fork is licensed
+> **GPL-3.0-only** like the original.
+>
+> Our changes: adds the **Blamdom** section (packs and mods straight from
+> <https://mine.blamdom.dev>), removes the FTB platform, and ships a self-contained
+> Linux build from CI.
+
 <p align="center">
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="/program_info/org.prismlauncher.PrismLauncher.logo-darkmode.svg">
