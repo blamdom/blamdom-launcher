@@ -51,9 +51,10 @@ jobs:
         run: ninja -C build prismlauncher
 
       - name: Bundle with linuxdeployqt
-        env:
-          PATH: /opt/qt/6.9.3/gcc_64/bin:$PATH
         run: |
+          # (PATH is exported in-run, not via env: — $PATH is not shell-expanded
+          # in the env block, which would drop /usr/bin and break git below)
+          export PATH=/opt/qt/6.9.3/gcc_64/bin:$PATH
           # The stock linuxdeployqt AppImage refuses to run on glibc > 2.35
           # (ubuntu-24.04 runners are 2.39), so build it from source and use
           # the escape hatch. Safe here: the runner is disposable.
