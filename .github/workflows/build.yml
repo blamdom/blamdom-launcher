@@ -63,6 +63,8 @@ jobs:
           git tag -f localbuild
           cmake -B build -G Ninja -DCMAKE_PREFIX_PATH=/opt/qt/6.9.3/gcc_64 -DCMAKE_BUILD_TYPE=Release
           cmake --build build
+          # back to the workspace: the rest of this script uses workspace-relative paths
+          cd "$GITHUB_WORKSPACE"
           mkdir -p dist/blamdom-launcher-linux-x86_64
           cp build/prismlauncher dist/blamdom-launcher-linux-x86_64/blamdom-launcher
           /tmp/ldq/build/tools/linuxdeployqt/linuxdeployqt \
