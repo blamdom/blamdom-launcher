@@ -271,7 +271,7 @@ endif()
 
 # By using this key in your builds you accept the terms of use laid down in
 # https://docs.microsoft.com/en-us/legal/microsoft-identity-platform/terms-of-use
-set(Launcher_MSA_CLIENT_ID "" CACHE STRING "Client ID you can get from Microsoft Identity Platform when you register an application")  # blank: blamdom fork, MSA login disabled (see fork policy in README)
+set(Launcher_MSA_CLIENT_ID "039c1282-191d-4603-8831-44546f8fff49" CACHE STRING "Client ID you can get from Microsoft Identity Platform when you register an application")  # blamdom fork: our own app registration (see fork policy in README)
 
 # By using this key in your builds you accept the terms and conditions laid down in
 # https://support.curseforge.com/en/support/solutions/articles/9000207405-curse-forge-3rd-party-api-terms-and-conditions
