@@ -34,8 +34,11 @@ jobs:
         run: |
           python3 -m venv ~/.aqtvenv
           ~/.aqtvenv/bin/pip install aqtinstall
+          # Qt 6.9: qtbase is the base package (always installed, not a module);
+          # qttools doesn't exist as a module. Only qtnetworkauth is an actual
+          # module Prism links.
           ~/.aqtvenv/bin/aqt install-qt linux desktop 6.9.3 linux_gcc_64 \
-            -m qtbase qtnetworkauth qttools -O /opt/qt
+            -m qtnetworkauth -O /opt/qt
 
       - name: Configure
         run: |
