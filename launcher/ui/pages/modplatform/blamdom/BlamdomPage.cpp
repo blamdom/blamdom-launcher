@@ -170,9 +170,21 @@ void BlamdomPage::applyFilter()
             continue;
         }
         auto* nameItem = new QStandardItem(p.name);
-        nameItem->setData(p.name);
+        nameItem->setData(p.name, Qt::UserRole);
         auto* verItem = new QStandardItem(QStringLiteral("v%1 · MC %2").arg(p.version, p.minecraft));
         model->appendRow({ nameItem, verItem });
+    }
+
+    // Blamdom fork: keep a selection so the details panel and the dialog's OK
+    // button are ready immediately (upstream leaves the list unselected, which
+    // left the panel stuck on "Loading…" and OK disabled).
+    if (model->rowCount() > 0 && !m_ui->packView->currentIndex().isValid()) {
+        m_ui->packView->setCurrentIndex(model->index(0, 0));
+    }
+    // Drive the details + suggested-pack from the current selection. (A
+    // programmatic setCurrentIndex doesn't always emit currentChanged.)
+    if (m_ui->packView->currentIndex().isValid()) {
+        onSelectionChanged();
     }
 }
 
