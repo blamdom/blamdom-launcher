@@ -302,6 +302,16 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), ui(new Ui::MainWi
         connect(newsLabel, &QAbstractButton::clicked, this, &MainWindow::newsButtonClicked);
         connect(m_newsChecker.get(), &NewsChecker::newsLoaded, this, &MainWindow::updateNewsLabel);
         updateNewsLabel();
+        if (BuildConfig.NEWS_RSS_URL.isEmpty()) {
+            // Blamdom fork: no news feed (upstream's feed is Prism's own news). Keep the bar hidden even if saved window state re-shows it.
+            ui->newsToolBar->hide();
+            ui->newsToolBar->toggleViewAction()->setVisible(false);
+            connect(ui->newsToolBar, &QToolBar::visibilityChanged, ui->newsToolBar, [bar = ui->newsToolBar](bool visible) {
+                if (visible) {
+                    bar->hide();
+                }
+            });
+        }
     }
 
     // Create the instance list widget
@@ -403,7 +413,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), ui(new Ui::MainWi
     // auto accounts = APPLICATION->accounts();
 
     // load the news
-    {
+    if (!BuildConfig.NEWS_RSS_URL.isEmpty()) {
         m_newsChecker->reloadNews();
         updateNewsLabel();
     }

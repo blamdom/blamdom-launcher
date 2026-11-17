@@ -6,6 +6,10 @@ on:
     tags: ["v*"]
   pull_request:
 
+# releases are created with the workflow's own token
+permissions:
+  contents: write
+
 jobs:
   linux:
     name: Linux x86_64
@@ -15,6 +19,19 @@ jobs:
         uses: actions/checkout@v4
         with:
           submodules: recursive
+
+      - name: Check the tag matches the launcher version (tags only)
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          # The updater compares the release tag with the version baked into the binary.
+          # A mismatch means every user is told to update forever, or never. Fail early.
+          V=$(grep -E '^set\(Launcher_VERSION_(MAJOR|MINOR|PATCH) ' CMakeLists.txt | sed -E 's/.* ([0-9]+)\)$/\1/' | paste -sd.)
+          TAG="${GITHUB_REF_NAME#v}"
+          echo "CMake version: $V   tag: $TAG"
+          if [ "$V" != "$TAG" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match Launcher_VERSION in CMakeLists.txt ($V). Bump it first."
+            exit 1
+          fi
 
       - name: Install dependencies
         run: |
@@ -40,6 +57,13 @@ jobs:
           # module Prism links.
           ~/.aqtvenv/bin/aqt install-qt linux desktop 6.9.3 linux_gcc_64 \
             -m qtnetworkauth -O /opt/qt
+
+      - name: Updater self-test (version logic, checksum, extract, swap + rollback)
+        run: |
+          export PATH=/opt/qt/6.9.3/gcc_64/bin:$PATH
+          cmake -S tests/blamdom-updater -B /tmp/updater-selftest -G Ninja -DCMAKE_PREFIX_PATH=/opt/qt/6.9.3/gcc_64
+          cmake --build /tmp/updater-selftest
+          QT_QPA_PLATFORM=offscreen /tmp/updater-selftest/selftest
 
       - name: Configure
         run: |
@@ -68,21 +92,31 @@ jobs:
           cd "$GITHUB_WORKSPACE"
           mkdir -p dist/blamdom-launcher-linux-x86_64
           cp build/prismlauncher dist/blamdom-launcher-linux-x86_64/blamdom-launcher
+          cp program_info/blamdom-launcher-256.png dist/blamdom-launcher-linux-x86_64/blamdom-launcher.png  # icon for the desktop entry
           /tmp/ldq/build/tools/linuxdeployqt/linuxdeployqt \
             dist/blamdom-launcher-linux-x86_64/blamdom-launcher \
             -bundle-non-qt-libs -unsupported-allow-new-glibc
           # Sanity: the self-contained bundle must boot
           xvfb-run -a dist/blamdom-launcher-linux-x86_64/blamdom-launcher --version
           tar -czf blamdom-launcher-linux-x86_64.tar.gz -C dist blamdom-launcher-linux-x86_64
+          # The in-app updater verifies the download against this file
+          sha256sum blamdom-launcher-linux-x86_64.tar.gz > SHA256SUMS
+          cat SHA256SUMS
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: blamdom-launcher-linux-x86_64
-          path: blamdom-launcher-linux-x86_64.tar.gz
+          path: |
+            blamdom-launcher-linux-x86_64.tar.gz
+            SHA256SUMS
 
       - name: Publish release (tags only)
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          files: blamdom-launcher-linux-x86_64.tar.gz
+          files: |
+            blamdom-launcher-linux-x86_64.tar.gz
+            SHA256SUMS
+          fail_on_unmatched_files: true
+          generate_release_notes: true

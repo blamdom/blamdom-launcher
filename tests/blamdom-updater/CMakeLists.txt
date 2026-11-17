@@ -1,0 +1,8 @@
+cmake_minimum_required(VERSION 3.16)
+project(blamdom_updater_selftest CXX)
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+find_package(Qt6 REQUIRED COMPONENTS Core)
+add_executable(selftest selftest.cpp ${CMAKE_CURRENT_SOURCE_DIR}/../../launcher/updater/BlamdomUpdateLogic.cpp)
+target_include_directories(selftest PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../../launcher/updater)
+target_link_libraries(selftest PRIVATE Qt6::Core)

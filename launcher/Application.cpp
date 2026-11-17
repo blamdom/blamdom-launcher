@@ -156,6 +156,7 @@
 #endif
 #else
 #include "updater/PrismExternalUpdater.h"
+#include "updater/BlamdomUpdater.h"
 #endif
 
 #if defined Q_OS_WIN32
@@ -650,8 +651,16 @@ Application::Application(int& argc, char** argv) : QApplication(argc, argv)
         m_settings.reset(new INISettingsObject({ BuildConfig.LAUNCHER_CONFIGFILE, "polymc.cfg", "multimc.cfg" }, this));
 
         // Theming
-        m_settings->registerSetting("IconTheme", QString());
-        m_settings->registerSetting("ApplicationTheme", QString());
+        // Blamdom fork: our own look is the default (upstream defaults to the bland "system" theme on Linux).
+        m_settings->registerSetting("IconTheme", QStringLiteral("flat_white"));
+        m_settings->registerSetting("ApplicationTheme", QStringLiteral("blamdom"));
+        m_settings->registerSetting("BlamdomThemeApplied", false);
+        if (!m_settings->get("BlamdomThemeApplied").toBool()) {
+            // one-time: installs that saved "system" (or an upstream pick) before this theme existed get the Blamdom look
+            m_settings->set("ApplicationTheme", QStringLiteral("blamdom"));
+            m_settings->set("IconTheme", QStringLiteral("flat_white"));
+            m_settings->set("BlamdomThemeApplied", true);
+        }
         m_settings->registerSetting("BackgroundCat", QString("kitteh"));
 
         // Remembered state
@@ -1329,7 +1338,8 @@ bool Application::updaterEnabled()
 #if defined(Q_OS_MACOS)
     return BuildConfig.UPDATER_ENABLED;
 #else
-    return BuildConfig.UPDATER_ENABLED && QFileInfo(FS::PathCombine(m_rootPath, updaterBinaryName())).isFile();
+    // Blamdom fork: our own updater (GitHub releases), no separate updater binary needed.
+    return !BuildConfig.UPDATER_GITHUB_REPO.isEmpty();
 #endif
 }
 
@@ -1424,7 +1434,7 @@ void Application::performMainStartupAction()
         m_updater.reset(new MacSparkleUpdater());
 #endif
 #else
-        m_updater.reset(new PrismExternalUpdater(m_mainWindow, m_rootPath, m_dataPath));
+        m_updater.reset(new BlamdomUpdater(m_mainWindow, m_rootPath, m_dataPath));
 #endif
         qDebug() << "<> Updater started.";
     }

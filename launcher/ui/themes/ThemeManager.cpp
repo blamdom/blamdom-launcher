@@ -26,6 +26,7 @@
 #include <QStyle>
 #include <QStyleFactory>
 #include "Result.h"
+#include "ui/themes/BlamdomTheme.h"
 #include "ui/themes/BrightTheme.h"
 #include "ui/themes/CatPack.h"
 #include "ui/themes/CustomTheme.h"
@@ -146,6 +147,7 @@ void ThemeManager::initializeWidgets()
     auto darkThemeId = addTheme(std::make_unique<DarkTheme>());
     themeDebugLog() << "Loading Built-in Theme:" << darkThemeId;
     themeDebugLog() << "Loading Built-in Theme:" << addTheme(std::make_unique<BrightTheme>());
+    themeDebugLog() << "Loading Built-in Theme:" << addTheme(std::make_unique<BlamdomTheme>());
 
     themeDebugLog() << "<> Initializing System Widget Themes";
     QStringList styles = QStyleFactory::keys();

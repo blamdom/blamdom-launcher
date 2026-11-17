@@ -174,6 +174,10 @@ set(MAC_UPDATE_SOURCES
 set(PRISM_UPDATE_SOURCES
     updater/PrismExternalUpdater.h
     updater/PrismExternalUpdater.cpp
+    updater/BlamdomUpdateLogic.h
+    updater/BlamdomUpdateLogic.cpp
+    updater/BlamdomUpdater.h
+    updater/BlamdomUpdater.cpp
 )
 
 # Backend for the news bar... there's usually no news.
@@ -827,6 +831,8 @@ SET(LAUNCHER_SOURCES
     # GUI - themes
     ui/themes/FusionTheme.cpp
     ui/themes/FusionTheme.h
+    ui/themes/BlamdomTheme.cpp
+    ui/themes/BlamdomTheme.h
     ui/themes/BrightTheme.cpp
     ui/themes/BrightTheme.h
     ui/themes/CustomTheme.cpp

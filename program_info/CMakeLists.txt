@@ -8,7 +8,7 @@ if(UNIX)
     endif()
 endif()
 
-set(Launcher_CommonName "PrismLauncher")
+set(Launcher_CommonName "BlamdomLauncher")  # own data dir (~/.local/share/BlamdomLauncher) so it never shares settings with a real Prism install
 set(Launcher_DisplayName "Blamdom Launcher")
 set(Launcher_AppID "org.prismlauncher.PrismLauncher")
 set(Launcher_Domain "mine.blamdom.dev")
@@ -16,7 +16,7 @@ set(Launcher_Git "https://github.com/blamdom/blamdom-launcher")
 
 set(Launcher_Name "${Launcher_CommonName}" PARENT_SCOPE)
 set(Launcher_DisplayName "${Launcher_DisplayName}" PARENT_SCOPE)
-set(Launcher_ENVName "PRISMLAUNCHER" PARENT_SCOPE)
+set(Launcher_ENVName "BLAMDOMLAUNCHER" PARENT_SCOPE)
 set(Launcher_Domain "${Launcher_Domain}" PARENT_SCOPE)
 set(Launcher_Git "${Launcher_Git}" PARENT_SCOPE)
 

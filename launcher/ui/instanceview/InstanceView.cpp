@@ -470,9 +470,10 @@ void InstanceView::paintEvent([[maybe_unused]] QPaintEvent* event)
         auto innerBounds = bounds;
         innerBounds.adjust(10, 10, -10, -10);
 
-        QColor background = QApplication::palette().color(QPalette::WindowText);
-        QColor foreground = QApplication::palette().color(QPalette::Base);
-        foreground.setAlpha(190);
+        // Blamdom fork: panel color + normal text color (upstream inverts WindowText/Base, which is a harsh white box on a dark theme)
+        QColor background = QApplication::palette().color(QPalette::Button);
+        QColor foreground = QApplication::palette().color(QPalette::Text);
+        foreground.setAlpha(235);
         painter.setFont(font);
         auto fontMetrics = painter.fontMetrics();
         auto textRect = fontMetrics.boundingRect(innerBounds, Qt::AlignHCenter | Qt::TextWordWrap, emptyString);
