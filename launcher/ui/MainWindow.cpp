@@ -151,6 +151,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), ui(new Ui::MainWi
     ui->setupUi(this);
 
     setWindowIcon(APPLICATION->logo());
+    // Blamdom fork: applicationDisplayName() already carries "Name Version" (set in Application)
     setWindowTitle(APPLICATION->applicationDisplayName());
 #ifndef QT_NO_ACCESSIBILITY
     setAccessibleName(BuildConfig.LAUNCHER_DISPLAYNAME);
@@ -162,6 +163,21 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), ui(new Ui::MainWi
 
         // FIXME: why doesn't this work when done in the UI file?
         ui->instanceToolBar->setMinimumWidth(140);
+
+        // Blamdom fork: the design reference uses a full-width, rounded, spaced action list in the sidebar
+        for (auto* btn : ui->instanceToolBar->findChildren<QToolButton*>()) {
+            btn->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+        }
+        if (auto* layout = ui->instanceToolBar->layout()) {
+            layout->setSpacing(8);
+        }
+
+        // Blamdom fork: Add Instance is the blue primary call-to-action
+        if (auto* btn = ui->mainToolBar->widgetForAction(ui->actionAddInstance)) {
+            btn->setProperty("primary", true);
+        }
+        // and a second separator before the account cluster (reference: Update | Accounts)
+        ui->mainToolBar->insertSeparator(ui->actionAccountsButton);
 
         // if you try to add a widget to a toolbar in a .ui file
         // qt designer will delete it when you save the file >:(
@@ -331,6 +347,8 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), ui(new Ui::MainWi
         view->setContextMenuPolicy(Qt::CustomContextMenu);
         connect(view, &QWidget::customContextMenuRequested, this, &MainWindow::showInstanceContextMenu);
         connect(view, &InstanceView::droppedURLs, this, &MainWindow::processURLs, Qt::QueuedConnection);
+        // Blamdom fork: welcome card's "+ Add Instance" pill
+        connect(view, &InstanceView::addInstanceRequested, this, [this] { on_actionAddInstance_triggered(); });
 
         proxymodel = new InstanceProxyModel(this);
         proxymodel->setSourceModel(APPLICATION->instances());

@@ -55,6 +55,100 @@
 #include <Application.h>
 #include <InstanceList.h>
 
+namespace {
+// Blamdom fork: welcome-card artwork — stacked server racks, a skyline tile, clouds and sparkles,
+// all in the reference's monochrome blues. Drawn inside `box`.
+void drawBlamdomIllustration(QPainter& p, const QRectF& box)
+{
+    p.save();
+    p.setRenderHint(QPainter::Antialiasing, true);
+    const qreal w = box.width(), h = box.height();
+    const auto R = [&](qreal rx, qreal ry, qreal rw, qreal rh) {
+        return QRectF(box.left() + rx * w, box.top() + ry * h, rw * w, rh * h);
+    };
+    const QColor glow(102, 204, 255);       // indicator lights
+    const QColor mid(74, 118, 184);         // buildings
+    const QColor faint(204, 238, 255);      // sparkles
+    const QColor frame(58, 90, 138);
+
+    // orbit line behind everything
+    QPen orbit(frame, 1.2);
+    orbit.setStyle(Qt::DashLine);
+    orbit.setDashPattern({2, 4});
+    p.setPen(orbit);
+    p.setBrush(Qt::NoBrush);
+    p.drawEllipse(R(0.04, 0.14, 0.92, 0.72));
+
+    // skyline tile (upper right)
+    const QRectF tile = R(0.60, 0.05, 0.35, 0.42);
+    p.setPen(QPen(frame, 1));
+    p.setBrush(QColor(22, 58, 102, 230));
+    p.drawRoundedRect(tile, 9, 9);
+    // buildings
+    p.setPen(Qt::NoPen);
+    p.setBrush(mid);
+    const double bw[] = { 0.11, 0.15, 0.10, 0.14 };
+    const double bh[] = { 0.50, 0.75, 0.60, 0.92 };
+    double bx = 0.05;
+    for (int i = 0; i < 4; ++i) {
+        const qreal bwPix = tile.width() * bw[i];
+        const qreal bhPix = tile.height() * 0.82 * bh[i];
+        p.drawRoundedRect(QRectF(tile.left() + tile.width() * bx, tile.bottom() - 4 - bhPix, bwPix, bhPix), 2, 2);
+        // window lights
+        p.setBrush(glow);
+        const qreal wx = tile.left() + tile.width() * bx;
+        const qreal top = tile.bottom() - 4 - bhPix;
+        p.drawRect(QRectF(wx + bwPix * 0.22, top + bhPix * 0.18, 2.2, 2.2));
+        p.drawRect(QRectF(wx + bwPix * 0.62, top + bhPix * 0.38, 2.2, 2.2));
+        p.setBrush(mid);
+        bx += bw[i] + 0.055;
+    }
+
+    // clouds (upper left / center)
+    p.setPen(Qt::NoPen);
+    p.setBrush(QColor(136, 187, 238, 150));
+    p.drawEllipse(R(0.06, 0.10, 0.17, 0.13));
+    p.drawEllipse(R(0.14, 0.05, 0.15, 0.12));
+    p.drawEllipse(R(0.30, 0.14, 0.14, 0.11));
+
+    // server racks (three stacked units, left of center)
+    const double rackW = 0.44, rackH = 0.21, rackGap = 0.065;
+    double ry = 0.36;
+    for (int i = 0; i < 3; ++i) {
+        const QRectF rack = R(0.11, ry, rackW, rackH);
+        p.setPen(QPen(frame, 1));
+        p.setBrush(QColor(44, 74, 122, 240));
+        p.drawRoundedRect(rack, 6, 6);
+        // vent slot
+        p.setPen(Qt::NoPen);
+        p.setBrush(QColor(16, 40, 70, 230));
+        p.drawRoundedRect(QRectF(rack.left() + 8, rack.center().y() - 5, rack.width() * 0.52, 10), 3, 3);
+        // glowing indicator lights
+        for (int d = 0; d < 3; ++d) {
+            const QPointF c(rack.right() - 14 - d * 11, rack.center().y());
+            p.setBrush(QColor(102, 204, 255, 60));
+            p.drawEllipse(c, 5, 5);
+            p.setBrush(glow);
+            p.drawEllipse(c, 2.2, 2.2);
+        }
+        ry += rackH + rackGap;
+    }
+
+    // sparkles
+    p.setPen(QPen(faint, 1.4, Qt::SolidLine, Qt::RoundCap));
+    const auto sparkle = [&](qreal cx, qreal cy, qreal s) {
+        const QPointF c(box.left() + cx * w, box.top() + cy * h);
+        p.drawLine(c + QPointF(-s, 0), c + QPointF(s, 0));
+        p.drawLine(c + QPointF(0, -s), c + QPointF(0, s));
+    };
+    sparkle(0.52, 0.10, 5);
+    sparkle(0.98, 0.55, 4);
+    sparkle(0.03, 0.64, 4);
+
+    p.restore();
+}
+}  // namespace
+
 InstanceView::InstanceView(QWidget* parent) : QAbstractItemView(parent)
 {
     setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
@@ -262,6 +356,13 @@ int InstanceView::itemWidth() const
 
 void InstanceView::mousePressEvent(QMouseEvent* event)
 {
+    // Blamdom fork: the welcome card's pill triggers Add Instance
+    if (event->button() == Qt::LeftButton && model()->rowCount() == 0 && m_welcomePill.contains(event->pos())) {
+        emit addInstanceRequested();
+        event->accept();
+        return;
+    }
+
     executeDelayedItemsLayout();
 
     QPoint visualPos = event->pos();
@@ -458,42 +559,67 @@ void InstanceView::paintEvent([[maybe_unused]] QPaintEvent* event)
 
     if (model()->rowCount() == 0) {
         painter.save();
-        QString emptyString = tr("Welcome!") + "\n" + tr("Click \"Add Instance\" to get started.");
-
-        // calculate the rect for the overlay
         painter.setRenderHint(QPainter::Antialiasing, true);
-        QFont font("sans", 20);
-        font.setBold(true);
 
         QRect bounds = viewport()->geometry();
         bounds.moveTop(0);
-        auto innerBounds = bounds;
-        innerBounds.adjust(10, 10, -10, -10);
 
-        // Blamdom fork: panel color + normal text color (upstream inverts WindowText/Base, which is a harsh white box on a dark theme)
-        QColor background = QApplication::palette().color(QPalette::Button);
-        QColor foreground = QApplication::palette().color(QPalette::Text);
-        foreground.setAlpha(235);
-        painter.setFont(font);
-        auto fontMetrics = painter.fontMetrics();
-        auto textRect = fontMetrics.boundingRect(innerBounds, Qt::AlignHCenter | Qt::TextWordWrap, emptyString);
-        textRect.moveCenter(bounds.center());
+        // Blamdom fork: glassmorphism welcome card (design reference, Nov 2026)
+        m_welcomePill = {};
 
-        auto wrapRect = textRect;
-        wrapRect.adjust(-10, -10, 10, 10);
+        const int cardW = qMin(560, qMax(320, bounds.width() - 60));
+        const int cardH = qMin(470, qMax(300, bounds.height() - 60));
+        const QRect card(bounds.center().x() - cardW / 2, bounds.center().y() - cardH / 2, cardW, cardH);
+        const qreal radius = 20.0;
 
         // check if we are allowed to draw in our area
-        if (!event->rect().intersects(wrapRect)) {
+        if (!event->rect().intersects(card.adjusted(-4, -4, 4, 4))) {
+            painter.restore();
             return;
         }
 
-        painter.setBrush(QBrush(background));
-        painter.setPen(foreground);
-        painter.drawRoundedRect(wrapRect, 5.0, 5.0);
+        // card panel
+        painter.setPen(QPen(QColor(58, 90, 138, 235), 1));
+        painter.setBrush(QColor(19, 43, 80, 215));
+        painter.drawRoundedRect(card, radius, radius);
 
-        painter.setPen(foreground);
-        painter.setFont(font);
-        painter.drawText(textRect, Qt::AlignHCenter | Qt::TextWordWrap, emptyString);
+        // illustration
+        const QRectF illus(card.center().x() - 120, card.top() + 40, 240, 150);
+        drawBlamdomIllustration(painter, illus);
+
+        // headline
+        int y = qRound(illus.bottom()) + 18;
+        QFont headFont("sans", 21);
+        headFont.setBold(true);
+        painter.setFont(headFont);
+        painter.setPen(QColor("#f0f4f8"));
+        painter.drawText(QRectF(card.left(), y, cardW, 34), Qt::AlignHCenter, tr("Welcome to Blamdom Launcher!"));
+        y += 40;
+
+        // sub-headline
+        QFont bodyFont("sans", 13);
+        painter.setFont(bodyFont);
+        painter.setPen(QColor("#a0b0c0"));
+        painter.drawText(QRectF(card.left(), y, cardW, 24), Qt::AlignHCenter, tr("Manage and launch your instances in one place."));
+        y += 36;
+
+        // primary pill button
+        const QRect pill(card.center().x() - 105, y, 210, 44);
+        m_welcomePill = pill;
+        painter.setPen(Qt::NoPen);
+        painter.setBrush(QColor("#3b82f6"));
+        painter.drawRoundedRect(pill, 22, 22);
+        QFont pillFont("sans", 14);
+        pillFont.setBold(true);
+        painter.setFont(pillFont);
+        painter.setPen(QColor("#ffffff"));
+        painter.drawText(pill, Qt::AlignCenter, tr("+ Add Instance"));
+        y += 44 + 16;
+
+        // helper text
+        painter.setFont(QFont("sans", 12));
+        painter.setPen(QColor("#8a9ab0"));
+        painter.drawText(QRectF(card.left(), y, cardW, 22), Qt::AlignHCenter, tr("Create your first instance to get started."));
 
         painter.restore();
         return;

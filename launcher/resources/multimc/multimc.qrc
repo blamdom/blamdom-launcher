@@ -22,6 +22,9 @@
         <!-- Blamdom logo icon (grass block) -->
         <file>scalable/instances/blamdom.svg</file>
 
+        <!-- Blamdom default instance icon (blue skyline squircle) -->
+        <file>scalable/instances/blamdom_skyline.svg</file>
+
         <!-- A proxy icon. Our own. SSSsss -->
         <file>scalable/proxy.svg</file>
 

@@ -94,6 +94,8 @@ class InstanceView : public QAbstractItemView {
    signals:
     void droppedURLs(QList<QUrl> urls);
     void groupStateChanged(QString group, bool collapsed);
+    // Blamdom fork: the welcome card's "+ Add Instance" pill was clicked
+    void addInstanceRequested();
 
    protected:
     bool isIndexHidden(const QModelIndex& index) const override;
@@ -138,6 +140,9 @@ class InstanceView : public QAbstractItemView {
     VisualGroup* m_pressedCategory;
     QItemSelectionModel::SelectionFlag m_ctrlDragSelectionFlag;
     QPoint m_lastDragPosition;
+
+    // Blamdom fork: rect of the welcome card's "+ Add Instance" pill (viewport coords, when drawn)
+    QRect m_welcomePill;
 
     VisualGroup* category(const QModelIndex& index) const;
     VisualGroup* category(const QString& cat) const;
