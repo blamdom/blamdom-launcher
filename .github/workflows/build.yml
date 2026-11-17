@@ -34,7 +34,7 @@ jobs:
         run: |
           python3 -m venv ~/.aqtvenv
           ~/.aqtvenv/bin/pip install aqtinstall
-          ~/.aqtvenv/bin/aqt install-qt linux desktop 6.9.3 desktop \
+          ~/.aqtvenv/bin/aqt install-qt linux desktop 6.9.3 linux_gcc_64 \
             -m qtbase qtnetworkauth qttools -O /opt/qt
 
       - name: Configure
