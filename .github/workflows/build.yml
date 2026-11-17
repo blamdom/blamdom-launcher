@@ -28,7 +28,8 @@ jobs:
             xvfb patchelf \
             libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-randr0 \
             libxcb-render-util0 libxcb-shape0 libxcb-xfixes0 libxcb-xkb1 \
-            libxcb-xinput0 libxcb-cursor0 libxcb-xinerama0 libxkbcommon0
+            libxcb-xinput0 libxcb-cursor0 libxcb-xinerama0 libxkbcommon0 libxkbcommon-x11-0 \
+            libxcb-util1 libxcb-sync1 libxcb-glx0 libxcb-present0 libxcb-dri3-0 libxcb-shm0
 
       - name: Install Qt 6.9.3 (aqt)
         run: |
