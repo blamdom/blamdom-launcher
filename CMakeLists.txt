@@ -196,7 +196,7 @@ set(Launcher_VERSION_NAME4_COMMA "${Launcher_VERSION_MAJOR},${Launcher_VERSION_M
 set(Launcher_BUILD_PLATFORM "blamdom" CACHE STRING "A short string identifying the platform that this build was built for. Only used to display in the about dialog.")
 
 # Github repo URL with releases for updater
-set(Launcher_UPDATER_GITHUB_REPO "https://github.com/PrismLauncher/PrismLauncher" CACHE STRING "Base github URL for the updater.")
+set(Launcher_UPDATER_GITHUB_REPO "https://github.com/blamdom/blamdom-launcher" CACHE STRING "Base github URL for the updater.")
 
 # Name to help updater identify valid artifacts
 set(Launcher_BUILD_ARTIFACT "" CACHE STRING "Artifact name to help the updater identify valid artifacts.")
@@ -240,9 +240,8 @@ set(Launcher_ENABLE_JAVA_DOWNLOADER_DEFAULT ON)
 # Although we recommend enabling this, we cannot guarantee binary compatibility on
 # differing Linux/BSD/etc distributions. Downstream packagers should be explicitly opt-ing into this
 # feature if they know it will work with their distribution.
-if(UNIX AND NOT APPLE)
-    set(Launcher_ENABLE_JAVA_DOWNLOADER_DEFAULT OFF)
-endif()
+# blamdom fork: keep the Java downloader ON for Linux too (players should not hunt for a JDK)
+
 
 # Java downloader
 option(Launcher_ENABLE_JAVA_DOWNLOADER "Build the java downloader feature" ${Launcher_ENABLE_JAVA_DOWNLOADER_DEFAULT})
