@@ -1,0 +1,81 @@
+name: build
+
+on:
+  push:
+    branches: [develop]
+    tags: ["v*"]
+  pull_request:
+
+jobs:
+  linux:
+    name: Linux x86_64
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential cmake ninja-build pkgconf extra-cmake-modules \
+            python3-venv python3-pip \
+            libcmark-dev cmark libqrencode-dev libarchive-dev libtomlplusplus-dev \
+            zlib1g-dev libxkbcommon-dev libfontconfig1-dev libgl1-mesa-dev libegl-dev \
+            libglib2.0-dev libdbus-1-dev gamemode-dev default-jdk-headless \
+            xvfb patchelf \
+            libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-randr0 \
+            libxcb-render-util0 libxcb-shape0 libxcb-xfixes0 libxcb-xkb1 \
+            libxcb-xinput0 libxcb-cursor0 libxcb-xinerama0 libxkbcommon0
+
+      - name: Install Qt 6.9.3 (aqt)
+        run: |
+          python3 -m venv ~/.aqtvenv
+          ~/.aqtvenv/bin/pip install aqtinstall
+          ~/.aqtvenv/bin/aqt install-qt linux desktop 6.9.3 desktop \
+            -m qtbase qtnetworkauth qttools -O /opt/qt
+
+      - name: Configure
+        run: |
+          cmake -B build -G Ninja \
+            -DCMAKE_PREFIX_PATH=/opt/qt/6.9.3/gcc_64 \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DBUILD_TESTING=OFF
+
+      - name: Build
+        run: ninja -C build prismlauncher
+
+      - name: Bundle with linuxdeployqt
+        env:
+          PATH: /opt/qt/6.9.3/gcc_64/bin:$PATH
+        run: |
+          # The stock linuxdeployqt AppImage refuses to run on glibc > 2.35
+          # (ubuntu-24.04 runners are 2.39), so build it from source and use
+          # the escape hatch. Safe here: the runner is disposable.
+          git clone --depth 1 https://github.com/probonopd/linuxdeployqt /tmp/ldq
+          cd /tmp/ldq
+          git tag -f localbuild
+          cmake -B build -G Ninja -DCMAKE_PREFIX_PATH=/opt/qt/6.9.3/gcc_64 -DCMAKE_BUILD_TYPE=Release
+          cmake --build build
+          mkdir -p dist/blamdom-launcher-linux-x86_64
+          cp build/prismlauncher dist/blamdom-launcher-linux-x86_64/blamdom-launcher
+          /tmp/ldq/build/tools/linuxdeployqt/linuxdeployqt \
+            dist/blamdom-launcher-linux-x86_64/blamdom-launcher \
+            -bundle-non-qt-libs -unsupported-allow-new-glibc
+          # Sanity: the self-contained bundle must boot
+          xvfb-run -a dist/blamdom-launcher-linux-x86_64/blamdom-launcher --version
+          tar -czf blamdom-launcher-linux-x86_64.tar.gz -C dist blamdom-launcher-linux-x86_64
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: blamdom-launcher-linux-x86_64
+          path: blamdom-launcher-linux-x86_64.tar.gz
+
+      - name: Publish release (tags only)
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: blamdom-launcher-linux-x86_64.tar.gz
