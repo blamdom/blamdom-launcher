@@ -44,6 +44,7 @@
 #include <QMimeData>
 #include <QMouseEvent>
 #include <QPainter>
+#include <QPainterPath>
 #include <QPersistentModelIndex>
 #include <QScrollBar>
 #include <QtMath>
@@ -56,94 +57,105 @@
 #include <InstanceList.h>
 
 namespace {
-// Blamdom fork: welcome-card artwork — stacked server racks, a skyline tile, clouds and sparkles,
-// all in the reference's monochrome blues. Drawn inside `box`.
-void drawBlamdomIllustration(QPainter& p, const QRectF& box)
+// Blamdom fork: "Cozy Night" welcome-card scene (design direction B, approved Nov 2026) —
+// starfield, crescent moon, mountain ranges, a tent and a campfire with an ember glow.
+// Drawn inside `box`; the bottom fades into the card body color (#0e1b20).
+void drawBlamdomNightScene(QPainter& p, const QRectF& box)
 {
     p.save();
     p.setRenderHint(QPainter::Antialiasing, true);
+    p.setClipRect(box);
     const qreal w = box.width(), h = box.height();
-    const auto R = [&](qreal rx, qreal ry, qreal rw, qreal rh) {
-        return QRectF(box.left() + rx * w, box.top() + ry * h, rw * w, rh * h);
-    };
-    const QColor glow(102, 204, 255);       // indicator lights
-    const QColor mid(74, 118, 184);         // buildings
-    const QColor faint(204, 238, 255);      // sparkles
-    const QColor frame(58, 90, 138);
+    const auto P = [&](qreal rx, qreal ry) { return QPointF(box.left() + rx * w, box.top() + ry * h); };
 
-    // orbit line behind everything
-    QPen orbit(frame, 1.2);
-    orbit.setStyle(Qt::DashLine);
-    orbit.setDashPattern({2, 4});
-    p.setPen(orbit);
-    p.setBrush(Qt::NoBrush);
-    p.drawEllipse(R(0.04, 0.14, 0.92, 0.72));
+    // sky: slightly lighter at the top, blending down into the card
+    QLinearGradient sky(0, box.top(), 0, box.bottom());
+    sky.setColorAt(0.0, QColor("#0e2128"));
+    sky.setColorAt(1.0, QColor("#0a1418"));
+    p.fillRect(box, sky);
 
-    // skyline tile (upper right)
-    const QRectF tile = R(0.60, 0.05, 0.35, 0.42);
-    p.setPen(QPen(frame, 1));
-    p.setBrush(QColor(22, 58, 102, 230));
-    p.drawRoundedRect(tile, 9, 9);
-    // buildings
+    // stars (fixed positions so the frame is stable)
     p.setPen(Qt::NoPen);
-    p.setBrush(mid);
-    const double bw[] = { 0.11, 0.15, 0.10, 0.14 };
-    const double bh[] = { 0.50, 0.75, 0.60, 0.92 };
-    double bx = 0.05;
-    for (int i = 0; i < 4; ++i) {
-        const qreal bwPix = tile.width() * bw[i];
-        const qreal bhPix = tile.height() * 0.82 * bh[i];
-        p.drawRoundedRect(QRectF(tile.left() + tile.width() * bx, tile.bottom() - 4 - bhPix, bwPix, bhPix), 2, 2);
-        // window lights
-        p.setBrush(glow);
-        const qreal wx = tile.left() + tile.width() * bx;
-        const qreal top = tile.bottom() - 4 - bhPix;
-        p.drawRect(QRectF(wx + bwPix * 0.22, top + bhPix * 0.18, 2.2, 2.2));
-        p.drawRect(QRectF(wx + bwPix * 0.62, top + bhPix * 0.38, 2.2, 2.2));
-        p.setBrush(mid);
-        bx += bw[i] + 0.055;
+    const double stars[][3] = {
+        { 0.07, 0.16, 0.70 }, { 0.15, 0.09, 0.50 }, { 0.24, 0.30, 0.60 }, { 0.36, 0.13, 0.45 },
+        { 0.47, 0.26, 0.55 }, { 0.58, 0.07, 0.50 }, { 0.68, 0.30, 0.40 }, { 0.90, 0.20, 0.60 },
+        { 0.11, 0.44, 0.40 }, { 0.44, 0.40, 0.40 }, { 0.94, 0.46, 0.45 }, { 0.29, 0.05, 0.45 },
+        { 0.83, 0.52, 0.35 },
+    };
+    for (const auto& s : stars) {
+        p.setBrush(QColor(231, 240, 234, int(60 + 120 * s[2])));
+        p.drawEllipse(P(s[0], s[1]), 1.4, 1.4);
     }
 
-    // clouds (upper left / center)
-    p.setPen(Qt::NoPen);
-    p.setBrush(QColor(136, 187, 238, 150));
-    p.drawEllipse(R(0.06, 0.10, 0.17, 0.13));
-    p.drawEllipse(R(0.14, 0.05, 0.15, 0.12));
-    p.drawEllipse(R(0.30, 0.14, 0.14, 0.11));
+    // crescent moon (upper right); the cut is tinted with the local sky color
+    {
+        const QPointF mc(P(0.80, 0.20));
+        const qreal mr = qMin(w, h) * 0.10;
+        p.setBrush(QColor("#f2ead2"));
+        p.drawEllipse(mc, mr, mr);
+        const qreal t = 0.20;  // moon's vertical position in the sky gradient
+        const auto mix = [&](int top, int bot) { return top + int(t * (bot - top)); };
+        p.setBrush(QColor(mix(0x0e, 0x0a), mix(0x21, 0x14), mix(0x28, 0x18)));
+        p.drawEllipse(mc + QPointF(mr * 0.45, -mr * 0.14), mr * 0.94, mr * 0.94);
+    }
 
-    // server racks (three stacked units, left of center)
-    const double rackW = 0.44, rackH = 0.21, rackGap = 0.065;
-    double ry = 0.36;
-    for (int i = 0; i < 3; ++i) {
-        const QRectF rack = R(0.11, ry, rackW, rackH);
-        p.setPen(QPen(frame, 1));
-        p.setBrush(QColor(44, 74, 122, 240));
-        p.drawRoundedRect(rack, 6, 6);
-        // vent slot
+    const QColor mBack("#0e1c21");
+    const QColor mMid("#13262d");
+
+    // back mountain range
+    p.setPen(Qt::NoPen);
+    p.setBrush(mBack);
+    QPolygonF b1; b1 << P(0.00, 1.00) << P(0.15, 0.60) << P(0.31, 1.00);
+    QPolygonF b2; b2 << P(0.25, 1.00) << P(0.43, 0.52) << P(0.61, 1.00);
+    QPolygonF b3; b3 << P(0.56, 1.00) << P(0.77, 0.58) << P(0.97, 1.00);
+    p.drawPolygon(b1);
+    p.drawPolygon(b2);
+    p.drawPolygon(b3);
+
+    // front peak with a faint ember light on its left slope
+    p.setBrush(mMid);
+    QPolygonF front; front << P(0.30, 1.00) << P(0.51, 0.46) << P(0.73, 1.00);
+    p.drawPolygon(front);
+    p.setBrush(QColor(245, 165, 36, 24));
+    QPolygonF lit; lit << P(0.51, 0.46) << P(0.41, 0.76) << P(0.50, 0.72);
+    p.drawPolygon(lit);
+
+    // ground strip
+    p.setBrush(mBack);
+    p.drawRect(QRectF(box.left(), box.bottom() - h * 0.06, w, h * 0.06));
+
+    // tent (left)
+    p.setBrush(mBack);
+    p.setPen(QPen(QColor("#1e3a42"), 1));
+    QPolygonF tent; tent << P(0.13, 0.945) << P(0.20, 0.79) << P(0.27, 0.945);
+    p.drawPolygon(tent);
+    p.setPen(Qt::NoPen);
+    p.setBrush(QColor(245, 165, 36, 44));
+    QPolygonF door; door << P(0.185, 0.945) << P(0.20, 0.86) << P(0.215, 0.945);
+    p.drawPolygon(door);
+
+    // campfire (right of center): glow, base, flame
+    {
+        const QPointF fc(P(0.62, 0.905));
+        const qreal r = qMin(w, h) * 0.17;
+        QRadialGradient glow(fc, r);
+        glow.setColorAt(0.0, QColor(245, 165, 36, 74));
+        glow.setColorAt(1.0, QColor(245, 165, 36, 0));
+        p.fillRect(QRectF(fc.x() - r, fc.y() - r, 2 * r, 2 * r), glow);
         p.setPen(Qt::NoPen);
-        p.setBrush(QColor(16, 40, 70, 230));
-        p.drawRoundedRect(QRectF(rack.left() + 8, rack.center().y() - 5, rack.width() * 0.52, 10), 3, 3);
-        // glowing indicator lights
-        for (int d = 0; d < 3; ++d) {
-            const QPointF c(rack.right() - 14 - d * 11, rack.center().y());
-            p.setBrush(QColor(102, 204, 255, 60));
-            p.drawEllipse(c, 5, 5);
-            p.setBrush(glow);
-            p.drawEllipse(c, 2.2, 2.2);
-        }
-        ry += rackH + rackGap;
+        p.setBrush(QColor(245, 165, 36));
+        p.drawEllipse(fc, qMin(w, h) * 0.05, qMin(w, h) * 0.022);
+        p.setBrush(QColor("#ffcf7a"));
+        p.drawEllipse(fc + QPointF(0, -qMin(w, h) * 0.032), qMin(w, h) * 0.030, qMin(w, h) * 0.055);
+        p.setBrush(QColor("#fff3d9"));
+        p.drawEllipse(fc + QPointF(0, -qMin(w, h) * 0.018), qMin(w, h) * 0.016, qMin(w, h) * 0.030);
     }
 
-    // sparkles
-    p.setPen(QPen(faint, 1.4, Qt::SolidLine, Qt::RoundCap));
-    const auto sparkle = [&](qreal cx, qreal cy, qreal s) {
-        const QPointF c(box.left() + cx * w, box.top() + cy * h);
-        p.drawLine(c + QPointF(-s, 0), c + QPointF(s, 0));
-        p.drawLine(c + QPointF(0, -s), c + QPointF(0, s));
-    };
-    sparkle(0.52, 0.10, 5);
-    sparkle(0.98, 0.55, 4);
-    sparkle(0.03, 0.64, 4);
+    // fade the bottom of the scene into the card body color
+    QLinearGradient fade(0, box.bottom() - h * 0.30, 0, box.bottom());
+    fade.setColorAt(0.0, QColor(14, 27, 32, 0));
+    fade.setColorAt(1.0, QColor(14, 27, 32, 255));
+    p.fillRect(QRectF(box.left(), box.bottom() - h * 0.30, w, h * 0.30), fade);
 
     p.restore();
 }
@@ -564,7 +576,7 @@ void InstanceView::paintEvent([[maybe_unused]] QPaintEvent* event)
         QRect bounds = viewport()->geometry();
         bounds.moveTop(0);
 
-        // Blamdom fork: glassmorphism welcome card (design reference, Nov 2026)
+        // Blamdom fork: "Cozy Night" welcome card (design direction B, approved Nov 2026)
         m_welcomePill = {};
 
         const int cardW = qMin(560, qMax(320, bounds.width() - 60));
@@ -578,48 +590,61 @@ void InstanceView::paintEvent([[maybe_unused]] QPaintEvent* event)
             return;
         }
 
-        // card panel
-        painter.setPen(QPen(QColor(58, 90, 138, 235), 1));
-        painter.setBrush(QColor(19, 43, 80, 215));
+        // card body
+        painter.setPen(QPen(QColor("#27464f"), 1));
+        painter.setBrush(QColor("#0e1b20"));
         painter.drawRoundedRect(card, radius, radius);
 
-        // illustration
-        const QRectF illus(card.center().x() - 120, card.top() + 40, 240, 150);
-        drawBlamdomIllustration(painter, illus);
+        // night scene across the top, clipped to the rounded card
+        painter.save();
+        QPainterPath cardClip;
+        cardClip.addRoundedRect(card, radius, radius);
+        painter.setClipPath(cardClip);
+        const QRectF scene(card.left(), card.top(), card.width(), card.height() * 0.50);
+        drawBlamdomNightScene(painter, scene);
+        painter.restore();
+
+        // left-aligned text block under the scene
+        const int pad = 32;
+        int y = qRound(scene.bottom()) + 24;
+
+        // eyebrow
+        QFont eyebrowFont("sans", 11);
+        eyebrowFont.setBold(true);
+        painter.setFont(eyebrowFont);
+        painter.setPen(QColor("#8fa8a0"));
+        painter.drawText(QRectF(card.left() + pad, y, cardW - pad * 2, 16), Qt::AlignLeft | Qt::AlignTop,
+                         tr("GOOD EVENING"));
+        y += 30;
 
         // headline
-        int y = qRound(illus.bottom()) + 18;
-        QFont headFont("sans", 21);
+        QFont headFont("sans", 22);
         headFont.setBold(true);
         painter.setFont(headFont);
-        painter.setPen(QColor("#f0f4f8"));
-        painter.drawText(QRectF(card.left(), y, cardW, 34), Qt::AlignHCenter, tr("Welcome to Blamdom Launcher!"));
-        y += 40;
+        painter.setPen(QColor("#e7f0ea"));
+        painter.drawText(QRectF(card.left() + pad, y, cardW - pad * 2, 34), Qt::AlignLeft | Qt::AlignTop,
+                         tr("Fire's lit. The world's waiting."));
+        y += 44;
 
         // sub-headline
         QFont bodyFont("sans", 13);
         painter.setFont(bodyFont);
-        painter.setPen(QColor("#a0b0c0"));
-        painter.drawText(QRectF(card.left(), y, cardW, 24), Qt::AlignHCenter, tr("Manage and launch your instances in one place."));
+        painter.setPen(QColor("#8fa8a0"));
+        painter.drawText(QRectF(card.left() + pad, y, cardW - pad * 2, 22), Qt::AlignLeft | Qt::AlignTop,
+                         tr("Your Blamdom worlds, one click from the bedrock."));
         y += 36;
 
-        // primary pill button
-        const QRect pill(card.center().x() - 105, y, 210, 44);
+        // primary pill button (left-aligned, ember amber)
+        const QRect pill(card.left() + pad, y, 210, 44);
         m_welcomePill = pill;
         painter.setPen(Qt::NoPen);
-        painter.setBrush(QColor("#3b82f6"));
+        painter.setBrush(QColor("#f5a524"));
         painter.drawRoundedRect(pill, 22, 22);
         QFont pillFont("sans", 14);
         pillFont.setBold(true);
         painter.setFont(pillFont);
-        painter.setPen(QColor("#ffffff"));
+        painter.setPen(QColor("#241503"));
         painter.drawText(pill, Qt::AlignCenter, tr("+ Add Instance"));
-        y += 44 + 16;
-
-        // helper text
-        painter.setFont(QFont("sans", 12));
-        painter.setPen(QColor("#8a9ab0"));
-        painter.drawText(QRectF(card.left(), y, cardW, 22), Qt::AlignHCenter, tr("Create your first instance to get started."));
 
         painter.restore();
         return;
