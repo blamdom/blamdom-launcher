@@ -33,6 +33,7 @@
 #include "Application.h"
 #include "BuildConfig.h"
 #include "DesktopServices.h"
+#include "modplatform/blamdom/BlamdomAPI.h"
 #include "ui/dialogs/UpdateAvailableDialog.h"
 
 using namespace BlamdomUpdate;
@@ -277,8 +278,13 @@ void BlamdomUpdater::install(const Release& release, const Asset& asset)
 {
     QString why;
     if (!canSelfUpdate(m_installDir, m_dataDir, APPLICATION->isPortable(), &why)) {
+        const QString fix = tr("For self-updates, install per-user instead (no root needed):\n"
+                               "    curl -fsSL %1/install.sh | sh\n"
+                               "It installs to your home folder, and the old system-wide install can be removed afterwards — the installer tells you how.")
+                                .arg(Blamdom::BlamdomAPI::PROD_URL);
         notify(tr("Update available"),
-               tr("Version %1 is available, but this install can't update itself:\n\n%2\n\nThe download page will open instead.").arg(release.version, why));
+               tr("Version %1 is available, but this install can't update itself:\n\n%2\n\n%3\n\nThe download page will open instead.")
+                   .arg(release.version, why, fix));
         openReleasePage(release);
         return;
     }
