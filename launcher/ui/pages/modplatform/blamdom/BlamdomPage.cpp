@@ -21,12 +21,26 @@
 
 #include <QAbstractItemView>
 #include <QItemSelectionModel>
+#include <QMap>
+#include <QMessageBox>
 #include <QStandardItemModel>
 #include <QUrl>
 
+#include "Application.h"
+#include "FileSystem.h"
 #include "InstanceImportTask.h"
+#include "InstanceList.h"
+#include "SysInfo.h"
+#include "java/JavaInstall.h"
+#include "java/JavaInstallList.h"
+#include "java/download/ArchiveDownloadTask.h"
+#include "meta/Index.h"
+#include "meta/VersionList.h"
+#include "minecraft/VersionFile.h"
 #include "net/NetJob.h"
+#include "ui/dialogs/CustomMessageBox.h"
 #include "ui/dialogs/NewInstanceDialog.h"
+#include "ui/dialogs/ProgressDialog.h"
 
 namespace {
 
@@ -56,6 +70,9 @@ BlamdomPage::BlamdomPage(NewInstanceDialog* dialog, QWidget* parent) : QWidget(p
     connect(m_ui->searchEdit, &QLineEdit::textChanged, this, &BlamdomPage::onSearchChanged);
     connect(m_ui->packView->selectionModel(), &QItemSelectionModel::currentChanged, this,
             [this](const QModelIndex&, const QModelIndex&) { onSelectionChanged(); });
+    // No connectSlotsByName here — wire the status-row buttons explicitly.
+    connect(m_ui->updateButton, &QPushButton::clicked, this, &BlamdomPage::onUpdateButton_clicked);
+    connect(m_ui->javaButton, &QPushButton::clicked, this, &BlamdomPage::onJavaButton_clicked);
 }
 
 BlamdomPage::~BlamdomPage()
@@ -114,6 +131,7 @@ void BlamdomPage::packsLoaded(QByteArray* response)
 {
     m_packsJob.reset();
     m_packs = Blamdom::BlamdomAPI::parsePacks(std::move(*response));
+    m_installed = Blamdom::BlamdomAPI::findInstalled(m_packs);
     m_loaded = true;
     applyFilter();
     if (m_packs.isEmpty()) {
@@ -218,6 +236,266 @@ void BlamdomPage::onSelectionChanged()
     }
 
     suggestCurrent();
+    updatePackStatus();
+}
+
+Blamdom::InstalledPack BlamdomPage::installedFor(const Blamdom::Pack& pack) const
+{
+    for (const auto& ip : m_installed) {
+        if (ip.packName == pack.name) {
+            return ip;
+        }
+    }
+    return {};
+}
+
+int BlamdomPage::requiredJavaMajor(const QString& minecraft)
+{
+    // "1.20.1" → major 1, minor 20, patch 1
+    const auto parts = minecraft.split('.');
+    if (parts.size() < 2) {
+        return 17;
+    }
+    const int major = parts[0].toInt();
+    const int minor = parts[1].toInt();
+    const int patch = parts.size() > 2 ? parts[2].section('.', 0, 0).toInt() : 0;
+    if (major > 1) {
+        return 21;
+    }
+    if (minor >= 21) {
+        return 21;
+    }
+    if (minor == 20) {
+        return patch >= 5 ? 21 : 17;
+    }
+    if (minor >= 17) {
+        return 17;
+    }
+    return 8;
+}
+
+bool BlamdomPage::hasJavaMajor(int major)
+{
+    auto* javalist = APPLICATION->javalist();
+    for (int i = 0; i < javalist->count(); ++i) {
+        auto java = std::dynamic_pointer_cast<JavaInstall>(javalist->at(i));
+        if (java && java->id.major() == major) {
+            return true;
+        }
+    }
+    return false;
+}
+
+void BlamdomPage::updatePackStatus()
+{
+    m_ui->updateButton->setVisible(false);
+    m_ui->javaButton->setVisible(false);
+    if (m_selected.name.isEmpty()) {
+        m_ui->packStatusLabel->setText(tr("Select a pack to see its install status."));
+        m_ui->javaStatusLabel->clear();
+        return;
+    }
+
+    const auto installed = installedFor(m_selected);
+    QString line;
+    if (installed.instanceId.isEmpty()) {
+        line = tr("<b>Not installed yet</b> — select it and press OK to install.");
+    } else if (installed.installedVersion == m_selected.version) {
+        line = tr("<b>Installed</b>: v%1 on “%2” — up to date.")
+                   .arg(installed.installedVersion.toHtmlEscaped(), installed.instanceName.toHtmlEscaped());
+    } else {
+        line = tr("<b>Installed</b>: v%1 on “%2” — <b>v%3</b> is available.")
+                   .arg(installed.installedVersion.toHtmlEscaped(), installed.instanceName.toHtmlEscaped(),
+                        m_selected.version.toHtmlEscaped());
+        m_ui->updateButton->setVisible(true);
+        m_ui->updateButton->setText(tr("Update to v%1").arg(m_selected.version));
+    }
+    m_ui->packStatusLabel->setText(line);
+
+    // Java requirement for this pack's Minecraft version, on its own line.
+    const int major = requiredJavaMajor(m_selected.minecraft);
+    auto* javalist = APPLICATION->javalist();
+    if (javalist->isLoaded()) {
+        if (hasJavaMajor(major)) {
+            m_ui->javaStatusLabel->setText(tr("Java %1: found.").arg(major));
+        } else {
+            m_ui->javaStatusLabel->setText(tr("Java %1: <b>not installed</b>.").arg(major));
+            m_ui->javaButton->setVisible(true);
+        }
+    } else {
+        m_ui->javaStatusLabel->setText(tr("Java %1: checking…").arg(major));
+        auto task = javalist->getLoadTask();
+        QObject::connect(task.get(), &Task::finished, this, [this] { updatePackStatus(); });
+        if (!task->isRunning()) {
+            task->start();
+        }
+    }
+}
+
+void BlamdomPage::onUpdateButton_clicked()
+{
+    const auto installed = installedFor(m_selected);
+    if (installed.instanceId.isEmpty() || m_updateJob) {
+        return;
+    }
+
+    auto response = CustomMessageBox::selectable(this, tr("Update %1?").arg(m_selected.name),
+                                                 tr("This updates the installed pack to <b>v%1</b> in place.<br>"
+                                                    "Your saves and settings are kept; pack files are updated and "
+                                                    "old versions of pack files are removed.")
+                                                     .arg(m_selected.version.toHtmlEscaped()),
+                                                 QMessageBox::Question, QMessageBox::Yes | QMessageBox::No)
+                        ->exec();
+    if (response != QMessageBox::Yes) {
+        return;
+    }
+    runUpdate(installed);
+}
+
+void BlamdomPage::runUpdate(const Blamdom::InstalledPack& installed)
+{
+    auto* inst = APPLICATION->instances()->getInstanceById(installed.instanceId);
+    if (!inst) {
+        m_ui->packStatusLabel->setText(tr("The installed instance is no longer available."));
+        return;
+    }
+
+    // With original_instance_id set, the stock Modrinth import reuses the
+    // existing instance: files whose hash is unchanged are skipped, files
+    // the old pack installed and the new one dropped are removed, and the
+    // pack's overrides are re-applied. That is the whole update.
+    QMap<QString, QString> extra;
+    extra.insert("pack_id", m_selected.name);
+    extra.insert("pack_version_id", m_selected.version);
+    extra.insert("original_instance_id", installed.instanceId);
+
+    auto* task = new InstanceImportTask(QUrl(m_selected.download), true, this, extra);
+    task->setName(inst->name());
+    task->setGroup(APPLICATION->instances()->getInstanceGroup(installed.instanceId));
+    task->setIcon(inst->iconKey());
+    task->setConfirmUpdate(false);  // the user already clicked Update
+
+    m_updateJob = Task::Ptr(APPLICATION->instances()->wrapInstanceTask(task));
+
+    QObject::connect(m_updateJob.get(), &Task::failed, this, [this](const QString& reason) {
+        m_ui->packStatusLabel->setText(tr("Update failed: %1").arg(reason.toHtmlEscaped()));
+        CustomMessageBox::selectable(this, tr("Update failed"), reason, QMessageBox::Critical)->show();
+    });
+    QObject::connect(m_updateJob.get(), &Task::succeeded, this, [this] {
+        m_installed = Blamdom::BlamdomAPI::findInstalled(m_packs);
+        updatePackStatus();
+        CustomMessageBox::selectable(
+            this, tr("Pack updated"),
+            tr("%1 is now on <b>v%2</b>.").arg(m_selected.name.toHtmlEscaped(), m_selected.version.toHtmlEscaped()),
+            QMessageBox::Information)
+            ->show();
+    });
+
+    m_ui->updateButton->setEnabled(false);
+    m_ui->packStatusLabel->setText(tr("Updating to <b>v%1</b>… (saves and settings are kept)").arg(m_selected.version.toHtmlEscaped()));
+
+    ProgressDialog pg(this);
+    pg.showSkipButton();
+    pg.execWithTask(m_updateJob.get());
+    m_updateJob.reset();
+}
+
+void BlamdomPage::onJavaButton_clicked()
+{
+    if (m_selected.name.isEmpty() || m_javaJob) {
+        return;
+    }
+    downloadTemurin(requiredJavaMajor(m_selected.minecraft));
+}
+
+void BlamdomPage::downloadTemurin(int major)
+{
+    const QString majorId = QStringLiteral("java%1").arg(major);
+    m_ui->javaButton->setEnabled(false);
+    m_ui->javaStatusLabel->setText(tr("Loading the Temurin list…"));
+
+    auto job = APPLICATION->metadataIndex()->loadVersion("net.adoptium.java", majorId);
+    if (!job) {
+        m_ui->javaButton->setEnabled(true);
+        m_ui->javaStatusLabel->setText(tr("Couldn't load the Java version list."));
+        return;
+    }
+
+    QObject::connect(job.get(), &Task::succeeded, this, [this, major, majorId] {
+        auto ver = APPLICATION->metadataIndex()->get("net.adoptium.java")->getVersion(majorId);
+        const auto arch = SysInfo::getSupportedJavaArchitecture();
+        if (!ver->isLoaded() || !ver->data() || arch.isEmpty()) {
+            m_ui->javaButton->setEnabled(true);
+            m_ui->javaStatusLabel->setText(tr("No Temurin %1 metadata available for this system.").arg(major));
+            return;
+        }
+
+        // Newest JRE for this system (fall back to a JDK if there is no JRE).
+        auto newer = [](const Java::MetadataPtr& a, const Java::MetadataPtr& b) {
+            if (a->version.major() != b->version.major())
+                return a->version.major() > b->version.major();
+            if (a->version.minor() != b->version.minor())
+                return a->version.minor() > b->version.minor();
+            return a->version.security() > b->version.security();
+        };
+        Java::MetadataPtr jre, jdk;
+        for (const auto& rt : ver->data()->runtimes) {
+            if (rt->runtimeOS != arch) {
+                continue;
+            }
+            if (rt->packageType == "jre" && (!jre || newer(rt, jre))) {
+                jre = rt;
+            } else if (rt->packageType == "jdk" && (!jdk || newer(rt, jdk))) {
+                jdk = rt;
+            }
+        }
+        auto pick = jre ? jre : jdk;
+        if (!pick) {
+            m_ui->javaButton->setEnabled(true);
+            m_ui->javaStatusLabel->setText(tr("No Temurin %1 build for this system (%2).").arg(QString::number(major), arch));
+            return;
+        }
+
+        m_ui->javaStatusLabel->setText(
+            tr("Downloading <b>%1</b> (Eclipse Temurin %2, ~45 MB)…").arg(pick->m_name.toHtmlEscaped(), QString::number(major)));
+        auto dl = makeShared<Java::ArchiveDownloadTask>(pick->url, FS::PathCombine(APPLICATION->javaPath(), pick->m_name),
+                                                        pick->checksumType, pick->checksumHash);
+
+        QObject::connect(dl.get(), &Task::failed, this, [this](const QString& reason) {
+            m_ui->javaButton->setEnabled(true);
+            m_ui->javaStatusLabel->setText(tr("Java download failed: %1").arg(reason.toHtmlEscaped()));
+            CustomMessageBox::selectable(this, tr("Java download failed"), reason, QMessageBox::Warning)->show();
+        });
+        QObject::connect(dl.get(), &Task::succeeded, this, [this, major] {
+            // Make sure the launcher picks the new installation up, then
+            // re-render the status line (it will show "Java N: found").
+            auto refresh = APPLICATION->javalist()->getLoadTask(true);
+            QObject::connect(refresh.get(), &Task::finished, this, [this] { updatePackStatus(); });
+            if (!refresh->isRunning()) {
+                refresh->start();
+            }
+            CustomMessageBox::selectable(this, tr("Java installed"),
+                                         tr("Eclipse Temurin %1 is installed. You can launch the game now.").arg(major),
+                                         QMessageBox::Information)
+                ->show();
+        });
+
+        m_javaJob = dl;
+        ProgressDialog pg(this);
+        pg.showSkipButton();
+        pg.execWithTask(dl.get());
+        m_javaJob.reset();
+        m_ui->javaButton->setEnabled(true);
+    });
+    QObject::connect(job.get(), &Task::failed, this, [this](const QString& reason) {
+        m_ui->javaButton->setEnabled(true);
+        m_ui->javaStatusLabel->setText(tr("Couldn't load the Java list: %1").arg(reason.toHtmlEscaped()));
+        CustomMessageBox::selectable(this, tr("Java list unavailable"), reason, QMessageBox::Warning)->show();
+    });
+    m_javaJob = job;
+    if (!job->isRunning()) {
+        job->start();
+    }
 }
 
 void BlamdomPage::suggestCurrent()

@@ -40,6 +40,19 @@ struct Pack {
     QString released;
 };
 
+//! A pack of ours installed locally.
+//!
+//! Detected from the copy of the pack index the stock Modrinth import keeps
+//! inside every imported instance (mrpack/modrinth.index.json) — its `name`
+//! and `versionId` fields are ours, so no extra bookkeeping is needed to know
+//! which local instances came from Blamdom.
+struct InstalledPack {
+    QString instanceId;
+    QString instanceName;
+    QString packName;
+    QString installedVersion;
+};
+
 //! One entry from /mods.json
 struct Mod {
     QString name;
@@ -77,6 +90,15 @@ class BlamdomAPI final {
 
     //! Parse a /mods.json body. Returns an empty list on malformed input.
     static QList<Mod> parseMods(const QByteArray& json);
+
+    //! Scan local instances for imports of one of our live packs (matched by
+    //! the pack name stored in the instance's kept copy of the pack index).
+    static QList<InstalledPack> findInstalled(const QList<Pack>& livePacks);
+
+    //! Canonical form of a pack name for matching: trimmed, lowercased, with
+    //! a trailing " (working title)" dropped (early builds used it, so old
+    //! installs keep matching the same pack after the name settled).
+    static QString normalizePackName(const QString& name);
 };
 
 }  // namespace Blamdom

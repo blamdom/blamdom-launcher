@@ -24,12 +24,23 @@
 #include <QJsonObject>
 
 #include "Application.h"
+#include "FileSystem.h"
+#include "InstanceList.h"
 #include "Json.h"
 #include "QObjectPtr.h"
 #include "net/NetJob.h"
 #include "net/Request.h"
 
+#include <QFile>
+#include <QRegularExpression>
+
 namespace Blamdom {
+
+QString BlamdomAPI::normalizePackName(const QString& name)
+{
+    static const QRegularExpression s_title("\\s*\\(working title\\)$", QRegularExpression::CaseInsensitiveOption);
+    return name.trimmed().replace(s_title, QString()).trimmed().toLower();
+}
 
 const QString BlamdomAPI::PROD_URL = QStringLiteral("https://mine.blamdom.dev");
 
@@ -112,6 +123,56 @@ QList<Blamdom::Mod> BlamdomAPI::parseMods(const QByteArray& json)
         }
     }
     return mods;
+}
+
+QList<Blamdom::InstalledPack> BlamdomAPI::findInstalled(const QList<Pack>& livePacks)
+{
+    QList<InstalledPack> out;
+    if (livePacks.isEmpty()) {
+        return out;
+    }
+
+    auto* instances = APPLICATION->instances();
+    for (int i = 0; i < instances->count(); ++i) {
+        auto* inst = instances->at(i);
+        if (!inst) {
+            continue;
+        }
+
+        // The stock Modrinth import keeps the pack index it installed from at
+        // <instance>/mrpack/modrinth.index.json — with our pack's name and
+        // versionId inside.
+        QFile f(FS::PathCombine(inst->instanceRoot(), "mrpack", "modrinth.index.json"));
+        if (!f.open(QIODevice::ReadOnly)) {
+            continue;
+        }
+        auto doc = QJsonDocument::fromJson(f.readAll());
+        f.close();
+        if (!doc.isObject()) {
+            continue;
+        }
+        const auto o = doc.object();
+        const QString packName = o["name"].toString();
+        const QString installedVersion = o["versionId"].toString();
+        if (packName.isEmpty() || installedVersion.isEmpty()) {
+            continue;
+        }
+
+        for (const auto& live : livePacks) {
+            if (normalizePackName(live.name) == normalizePackName(packName)) {
+                InstalledPack ip;
+                ip.instanceId = inst->id();
+                ip.instanceName = inst->name();
+                // Store the live pack's canonical name so callers can match it
+                // straight against the manifest without re-normalizing.
+                ip.packName = live.name;
+                ip.installedVersion = installedVersion;
+                out.append(ip);
+                break;
+            }
+        }
+    }
+    return out;
 }
 
 }  // namespace Blamdom
