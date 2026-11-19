@@ -173,7 +173,8 @@ jobs:
         shell: bash
         run: |
           # The CMake target is BlamdomLauncher (prismlauncher is only the output file name)
-          cmake --build build --config Release --target BlamdomLauncher --target JavaCheck --target NewLaunch --target NewLaunchLegacy
+          # BlamdomLauncher_filelink is a small Windows helper the install rules also expect
+          cmake --build build --config Release --target BlamdomLauncher --target BlamdomLauncher_filelink --target JavaCheck --target NewLaunch --target NewLaunchLegacy
           find build -name "*.jar"
 
       - name: Bundle (portable)
@@ -186,6 +187,7 @@ jobs:
           mv dist/blamdom-launcher-windows-x64/prismlauncher.exe dist/blamdom-launcher-windows-x64/blamdom-launcher.exe
           # Sanity: exe, jars and some DLLs must all be present
           test -s dist/blamdom-launcher-windows-x64/blamdom-launcher.exe
+          test -s dist/blamdom-launcher-windows-x64/prismlauncher_filelink.exe
           test -s dist/blamdom-launcher-windows-x64/jars/JavaCheck.jar
           ls dist/blamdom-launcher-windows-x64
           find dist/blamdom-launcher-windows-x64 -name "*.dll" | wc -l
