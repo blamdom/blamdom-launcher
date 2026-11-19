@@ -69,12 +69,23 @@ class BlamdomPage : public QWidget, public ModpackProviderBasePage {
     void suggestCurrent();
     void applyFilter();
 
+    //! Which Java major a pack's Minecraft version needs (1.20.1 → 17, …).
+    static int requiredJavaMajor(const QString& minecraft);
+    //! True if the launcher knows a Java installation with this major.
+    static bool hasJavaMajor(int major);
+    Blamdom::InstalledPack installedFor(const Blamdom::Pack& pack) const;
+    void updatePackStatus();
+    void runUpdate(const Blamdom::InstalledPack& installed);
+    void downloadTemurin(int major);
+
    private slots:
     void onSelectionChanged();
     void onSearchChanged();
     void packsLoaded(QByteArray* response);
     void modsLoaded(QByteArray* response);
     void requestFailed(const QString& reason);
+    void onUpdateButton_clicked();
+    void onJavaButton_clicked();
 
    private:
     Ui::BlamdomPage* m_ui = nullptr;
@@ -82,10 +93,13 @@ class BlamdomPage : public QWidget, public ModpackProviderBasePage {
 
     QList<Blamdom::Pack> m_packs;
     QList<Blamdom::Mod> m_mods;
+    QList<Blamdom::InstalledPack> m_installed;
 
     Blamdom::Pack m_selected;
     bool m_loaded = false;
 
     Task::Ptr m_packsJob;
     Task::Ptr m_modsJob;
+    Task::Ptr m_updateJob;
+    Task::Ptr m_javaJob;
 };
