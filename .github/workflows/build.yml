@@ -73,7 +73,12 @@ jobs:
             -DBUILD_TESTING=OFF
 
       - name: Build
-        run: ninja -C build prismlauncher
+        run: |
+          ninja -C build prismlauncher
+          # The Java jars (JavaCheck, NewLaunch) are separate targets; without
+          # them the launcher cannot detect installed Java or launch the game.
+          ninja -C build JavaCheck NewLaunch NewLaunchLegacy
+          ls -la build/jars
 
       - name: Bundle with linuxdeployqt
         run: |
@@ -93,6 +98,10 @@ jobs:
           mkdir -p dist/blamdom-launcher-linux-x86_64
           cp build/prismlauncher dist/blamdom-launcher-linux-x86_64/blamdom-launcher
           cp program_info/blamdom-launcher-256.png dist/blamdom-launcher-linux-x86_64/blamdom-launcher.png  # icon for the desktop entry
+          # The Java jars live next to the binary in jars/ (Application::getJarPath
+          # looks there); JavaCheck powers Java detection, NewLaunch the launch.
+          mkdir -p dist/blamdom-launcher-linux-x86_64/jars
+          cp build/jars/*.jar dist/blamdom-launcher-linux-x86_64/jars/
           /tmp/ldq/build/tools/linuxdeployqt/linuxdeployqt \
             dist/blamdom-launcher-linux-x86_64/blamdom-launcher \
             -bundle-non-qt-libs -unsupported-allow-new-glibc
