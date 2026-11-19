@@ -172,7 +172,7 @@ jobs:
       - name: Build
         shell: bash
         run: |
-          ninja -C build --config Release prismlauncher JavaCheck NewLaunch NewLaunchLegacy
+          cmake --build build --config Release --target prismlauncher --target JavaCheck --target NewLaunch --target NewLaunchLegacy
           find build -name "*.jar"
 
       - name: Bundle (portable)
