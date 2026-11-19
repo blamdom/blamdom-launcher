@@ -120,12 +120,114 @@ jobs:
             blamdom-launcher-linux-x86_64.tar.gz
             SHA256SUMS
 
-      - name: Publish release (tags only)
+      # Release publishing happens in the `publish` job below, which waits
+      # for the Windows build too — one release with both platform files.
+
+  windows:
+    name: Windows x64
+    runs-on: windows-2022
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Check the tag matches the launcher version (tags only)
         if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        run: |
+          V=$(grep -E '^set\(Launcher_VERSION_(MAJOR|MINOR|PATCH) ' CMakeLists.txt \
+               | sed -E 's/^[^(]*\(([^ ]+) ([0-9]+)\)/\2/' | paste -sd.)
+          T=${GITHUB_REF#refs/tags/}
+          [ "$V" = "$T" ] || { echo "::error::tag $T != version $V (bump CMakeLists.txt Launcher_VERSION)"; exit 1; }
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: zulu
+          java-version: '17'
+
+      - name: Enter MSVC developer shell
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: amd64
+
+      - name: Install Qt 6.9.3 (aqt)
+        shell: bash
+        run: |
+          python -m venv aqt
+          aqt/Scripts/pip install --quiet aqtinstall
+          aqt/Scripts/aqt install-qt windows desktop 6.9.3 win64_msvc2022_64 -m qtnetworkauth -O qt
+          ls qt/6.9.3/msvc2022_64/bin | head -5
+
+      - name: Configure
+        shell: bash
+        run: |
+          VCPKG="${VCPKG_INSTALLATION_ROOT:-D:/vcpkg}"
+          cmake -B build -G "Ninja Multi-Config" \
+            -DCMAKE_PREFIX_PATH="$HOME/qt/6.9.3/msvc2022_64" \
+            -DCMAKE_TOOLCHAIN_FILE="$VCPKG/scripts/buildsystems/vcpkg.cmake"
+          ninja -C build --version
+
+      - name: Build
+        shell: bash
+        run: |
+          ninja -C build --config Release prismlauncher JavaCheck NewLaunch NewLaunchLegacy
+          find build -name "*.jar"
+
+      - name: Bundle (portable)
+        shell: bash
+        run: |
+          # cmake --install brings the exe, the jars/, the Qt DLLs + plugins
+          # (qt_deploy_runtime_dependencies) and the vcpkg dependency DLLs.
+          cmake --install build --config Release --prefix dist/blamdom-launcher-windows-x64
+          # Brand the executable (the updater and docs refer to blamdom-launcher.exe)
+          mv dist/blamdom-launcher-windows-x64/prismlauncher.exe dist/blamdom-launcher-windows-x64/blamdom-launcher.exe
+          # Sanity: exe, jars and some DLLs must all be present
+          test -s dist/blamdom-launcher-windows-x64/blamdom-launcher.exe
+          test -s dist/blamdom-launcher-windows-x64/jars/JavaCheck.jar
+          ls dist/blamdom-launcher-windows-x64
+          find dist/blamdom-launcher-windows-x64 -name "*.dll" | wc -l
+
+      - name: Package
+        shell: bash
+        run: |
+          powershell -Command "Compress-Archive -Path 'dist/blamdom-launcher-windows-x64' -DestinationPath 'blamdom-launcher-windows-x64.zip' -Force"
+          sha256sum blamdom-launcher-windows-x64.zip > SHA256SUMS
+          cat SHA256SUMS
+          ls -la blamdom-launcher-windows-x64.zip
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: blamdom-launcher-windows-x64
+          path: |
+            blamdom-launcher-windows-x64.zip
+            SHA256SUMS
+
+  publish:
+    name: Publish release (tags only)
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: [linux, windows]
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Download platform artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release
+
+      - name: Merge checksums
+        run: |
+          cat release/blamdom-launcher-linux-x86_64/SHA256SUMS \
+              release/blamdom-launcher-windows-x64/SHA256SUMS > release/SHA256SUMS
+          cat release/SHA256SUMS
+
+      - name: Publish GitHub release
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            blamdom-launcher-linux-x86_64.tar.gz
-            SHA256SUMS
+            release/blamdom-launcher-linux-x86_64/blamdom-launcher-linux-x86_64.tar.gz
+            release/blamdom-launcher-windows-x64/blamdom-launcher-windows-x64.zip
+            release/SHA256SUMS
           fail_on_unmatched_files: true
           generate_release_notes: true
