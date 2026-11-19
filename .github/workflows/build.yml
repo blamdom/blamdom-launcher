@@ -172,7 +172,8 @@ jobs:
       - name: Build
         shell: bash
         run: |
-          cmake --build build --config Release --target prismlauncher --target JavaCheck --target NewLaunch --target NewLaunchLegacy
+          # The CMake target is BlamdomLauncher (prismlauncher is only the output file name)
+          cmake --build build --config Release --target BlamdomLauncher --target JavaCheck --target NewLaunch --target NewLaunchLegacy
           find build -name "*.jar"
 
       - name: Bundle (portable)
