@@ -26,29 +26,19 @@
 
 ## Installation
 
-- All downloads and instructions for Prism Launcher can be found on our [Website](https://prismlauncher.org/download).
-- Last build status can be found in the [GitHub Actions](https://github.com/PrismLauncher/PrismLauncher/actions) tab (this also includes the pull requests status).
+Downloads live on our site: **https://mine.blamdom.dev** (mirrored on every [GitHub release](https://github.com/blamdom/blamdom-launcher/releases)).
 
-<p align="center">
-<a href="https://repology.org/project/prismlauncher/versions">
-    <img src="https://repology.org/badge/vertical-allrepos/prismlauncher.svg?columns=3" alt="Packaging status">
-</a>
-</p>
+- **Linux x86_64** — `blamdom-launcher-linux-x86_64.tar.gz`, self-contained.
+  One-liner installer (per-user, checksum-verified, adds a menu entry):
+  ```sh
+  curl -fsSL https://mine.blamdom.dev/install.sh | sh
+  ```
+  or extract the tarball and run `blamdom-launcher`.
+- **Windows x64** — `blamdom-launcher-windows-x64.zip`, self-contained.
+  Extract it anywhere (no install, no admin) and run `blamdom-launcher.exe`.
 
-### Development Builds
-
-Please understand that these builds are not intended for most users. There may be bugs, and other instabilities. You have been warned.
-
-There are development builds available through:
-
-- [GitHub Actions](https://github.com/PrismLauncher/PrismLauncher/actions) (includes builds from pull requests opened by contributors)
-- [nightly.link](https://prismlauncher.org/nightly) (this will always point only to the latest version of develop)
-
-These have debug information in the binaries, so their file sizes are relatively larger.
-
-Prebuilt Development builds are provided for **Linux**, **Windows** and **macOS**.
-
-On Linux, we also offer our own [Flatpak nightly repository](https://github.com/PrismLauncher/flatpak). Most software centers are able to install it by opening [this link](https://flatpak.prismlauncher.org/prismlauncher-nightly.flatpakref).
+The launcher is self-updating: it checks the latest release and offers to
+update itself in place.
 
 ## Community & Support
 
