@@ -25,7 +25,7 @@ if command -v "inkscape" && command -v "icotool" && command -v "oxipng"; then
 
     oxipng --opt max --strip all --alpha --interlace 0 "$d/prismlauncher_"*".png"
 
-    rm prismlauncher.ico && icotool -o prismlauncher.ico -c \
+    rm -f blamdom-launcher.ico && icotool -o blamdom-launcher.ico -c \
         "$d/prismlauncher_256.png"  \
         "$d/prismlauncher_128.png"  \
         "$d/prismlauncher_64.png"   \
