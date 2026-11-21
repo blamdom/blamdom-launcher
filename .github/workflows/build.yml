@@ -214,6 +214,27 @@ jobs:
     needs: [linux, windows]
     runs-on: ubuntu-24.04
     steps:
+      - name: Checkout (for CHANGELOG.md)
+        uses: actions/checkout@v4
+
+      - name: Extract release notes from CHANGELOG.md
+        id: notes
+        run: |
+          V="${GITHUB_REF_NAME#v}"
+          if [ -f CHANGELOG.md ]; then
+            awk -v v="$V" '
+              /^## /{ insec = ($0 ~ "^## " v "([ -]|$)"); next }
+              insec { print }' CHANGELOG.md > "$RUNNER_TEMP/notes.md"
+          fi
+          if [ -s "$RUNNER_TEMP/notes.md" ]; then
+            echo "Release notes found in CHANGELOG.md for v$V"
+            echo "body<<BODYS" >> "$GITHUB_OUTPUT"
+            cat "$RUNNER_TEMP/notes.md" >> "$GITHUB_OUTPUT"
+            echo "BODYS" >> "$GITHUB_OUTPUT"
+          else
+            echo "No CHANGELOG.md section for v$V — falling back to generated notes"
+          fi
+
       - name: Download platform artifacts
         uses: actions/download-artifact@v4
         with:
@@ -233,4 +254,5 @@ jobs:
             release/blamdom-launcher-windows-x64/blamdom-launcher-windows-x64.zip
             release/SHA256SUMS
           fail_on_unmatched_files: true
-          generate_release_notes: true
+          body: ${{ steps.notes.outputs.body }}
+          generate_release_notes: ${{ !steps.notes.outputs.body }}
