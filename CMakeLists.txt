@@ -187,7 +187,7 @@ set(Launcher_LEGACY_FMLLIBS_BASE_URL "https://files.prismlauncher.org/fmllibs/" 
 # Blamdom Launcher releases are tagged v<MAJOR>.<MINOR>.<PATCH>; the tag MUST match these numbers (CI checks) or the updater loops/never fires.
 set(Launcher_VERSION_MAJOR 0)
 set(Launcher_VERSION_MINOR 1)
-set(Launcher_VERSION_PATCH 8)
+set(Launcher_VERSION_PATCH 9)
 
 set(Launcher_VERSION_NAME "${Launcher_VERSION_MAJOR}.${Launcher_VERSION_MINOR}.${Launcher_VERSION_PATCH}")
 set(Launcher_VERSION_NAME4 "${Launcher_VERSION_MAJOR}.${Launcher_VERSION_MINOR}.${Launcher_VERSION_PATCH}.0")
