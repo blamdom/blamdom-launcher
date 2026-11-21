@@ -196,6 +196,10 @@ class Config {
     QString MODRINTH_PROD_URL = "https://api.modrinth.com/v2";
     QStringList MODRINTH_MRPACK_HOSTS{ "cdn.modrinth.com", "github.com", "raw.githubusercontent.com", "gitlab.com" };
     QString MODRINTH_DOWNLOAD_HOST = "cdn.modrinth.com";
+    // Hosts we trust without prompting (Blamdom): Modrinth's own CDN plus
+    // our own site, which hosts our mods and packs. Imports whose download
+    // URLs all come from these hosts skip the untrusted-mods dialog.
+    QStringList BLAMDOM_TRUSTED_DOWNLOAD_HOSTS{ "cdn.modrinth.com", "mine.blamdom.dev" };
 
     QString FLAME_BASE_URL = "https://api.curseforge.com/v1";
     QString FLAME_DOWNLOAD_HOST = "edge.forgecdn.net";

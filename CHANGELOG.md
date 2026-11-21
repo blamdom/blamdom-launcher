@@ -6,6 +6,15 @@ All user-facing changes to the Blamdom Launcher.
 CI copies the matching `## <version>` section into the GitHub release notes,
 so a release without real notes means an entry was skipped.
 
+## 0.1.9 — 2026-11-21
+
+### Added
+
+- **Auto-trust for our own site.** Importing a modpack whose mods all come
+  from Modrinth or from mine.blamdom.dev no longer shows the "Easy There!"
+  untrusted-mods prompt — installing Our Cozy Pack (and our other packs) is
+  now one click. Any mod hosted elsewhere still prompts, exactly as before.
+
 ## 0.1.8 — 2026-11-21
 
 ### Changed

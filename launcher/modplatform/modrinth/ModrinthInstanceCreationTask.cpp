@@ -28,6 +28,8 @@
 #include <QAbstractButton>
 #include <QFileInfo>
 #include <QHash>
+#include <QSet>
+#include <QUrl>
 #include <vector>
 
 bool ModrinthCreationTask::abort()
@@ -465,24 +467,42 @@ bool ModrinthCreationTask::promptForUntrustedMods()
         return true;
     }
 
+    auto isTrustedUrl = [](const QUrl& url) {
+        return url.scheme() == "https" && BuildConfig.BLAMDOM_TRUSTED_DOWNLOAD_HOSTS.contains(url.host());
+    };
+
     QStringList untrustedMods;
+    QSet<QString> trustedPaths;  // files[] entries whose downloads are all from trusted hosts
 
     for (const auto& file : m_files) {
+        bool allTrusted = !file.downloads.isEmpty();
         for (const auto& url : file.downloads) {
-            if (url.scheme() != "https" || url.host() != BuildConfig.MODRINTH_DOWNLOAD_HOST) {
-                untrustedMods.append(file.path);
+            if (!isTrustedUrl(url)) {
+                allTrusted = false;
                 break;
             }
         }
+        if (allTrusted) {
+            trustedPaths.insert(file.path);
+        } else {
+            untrustedMods.append(file.path);
+        }
     }
 
+    // Files bundled in the archive: only prompt about ones that don't match a
+    // fully-trusted files[] entry (our packs ship their own mods in the
+    // archive, indexed with our site's URLs).
     const QDir mcDir{ FS::PathCombine(m_stagingPath, m_rootPath) };
     const QString modsPath{ FS::PathCombine(m_stagingPath, m_rootPath, "mods") };
     if (QDir(modsPath).exists()) {
         for (const auto& entry :
              QDirListing(modsPath, QDirListing::IteratorFlag::FilesOnly | QDirListing::IteratorFlag::ResolveSymlinks |
                                        QDirListing::IteratorFlag::FollowDirSymlinks | QDirListing::IteratorFlag::Recursive)) {
-            untrustedMods.append(mcDir.relativeFilePath(entry.absoluteFilePath()));
+            const QString rel = mcDir.relativeFilePath(entry.absoluteFilePath());
+            if (trustedPaths.contains(rel)) {
+                continue;
+            }
+            untrustedMods.append(rel);
         }
     }
 
