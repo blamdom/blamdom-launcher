@@ -6,6 +6,23 @@ All user-facing changes to the Blamdom Launcher.
 CI copies the matching `## <version>` section into the GitHub release notes,
 so a release without real notes means an entry was skipped.
 
+## 0.1.10 — 2026-11-21
+
+### Added
+
+- **Windows self-updates.** Windows now updates the launcher the same way
+  Linux does: the new version is downloaded, its checksum is verified, and the
+  launcher restarts into the new version — no more downloading a zip from the
+  site by hand. Your shortcuts and the folder you installed to keep working,
+  and your instances, accounts and settings are untouched.
+
+### Changed
+
+- The Windows download is now named `blamdom-launcher-windows-x86_64.zip`
+  (same content as before — the old name said `x64`, which didn't match the
+  Linux naming or the updater's asset lookup, so Windows update checks failed
+  silently and fell back to the download page).
+
 ## 0.1.9 — 2026-11-21
 
 ### Added

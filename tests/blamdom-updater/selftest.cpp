@@ -170,6 +170,93 @@ int main(int argc, char** argv)
     CHECK(!canSelfUpdate("/usr/lib", root + "/userdata", false, &why));               // system dir, not writable
     CHECK(!canSelfUpdate("/tmp/.mount_BlamdomXYZ", root + "/userdata", false, &why)); // AppImage mount
 
+    // ---- zip extraction (the Windows path)
+    // build a zip the way CI does: one top-level folder, nested files
+    write(root + "/zpkg/blamdom-launcher-windows-x86_64/app.exe", "MZ-new");
+    write(root + "/zpkg/blamdom-launcher-windows-x86_64/Qt6Core.dll", "dll-new");
+    write(root + "/zpkg/blamdom-launcher-windows-x86_64/jars/JavaCheck.jar", "jar-new");
+    write(root + "/zpkg/blamdom-launcher-windows-x86_64/jars/NewLaunch.jar", "jar-new2");
+    {
+        bool made = false;
+        QProcess z;
+        z.setWorkingDirectory(root + "/zpkg");
+        z.start("zip", { "-qr", root + "/update.zip", "blamdom-launcher-windows-x86_64" });
+        made = z.waitForFinished(20000) && z.exitCode() == 0;
+        if (!made) {  // no zip CLI on this box: python3's zipfile makes the same layout
+            z.start("python3", { "-c",
+                                 "import zipfile, os, sys\n"
+                                 "root, out = sys.argv[1], sys.argv[2]\n"
+                                 "z = zipfile.ZipFile(out, 'w', zipfile.ZIP_DEFLATED)\n"
+                                 "for dirpath, dirnames, filenames in os.walk(root):\n"
+                                 "    for fn in filenames:\n"
+                                 "        p = os.path.join(dirpath, fn)\n"
+                                 "        z.write(p, os.path.relpath(p, os.path.dirname(root)))\n"
+                                 "z.close()\n",
+                                 root + "/zpkg",
+                                 root + "/update.zip" });
+            made = z.waitForFinished(20000) && z.exitCode() == 0;
+        }
+        CHECK(made);
+    }
+    const QString zstaged = root + "/zipapp";
+    CHECK(extractZip(root + "/update.zip", zstaged, &err));
+    CHECK(read(zstaged + "/app.exe") == "MZ-new");
+    CHECK(read(zstaged + "/jars/JavaCheck.jar") == "jar-new");
+    CHECK(read(zstaged + "/jars/NewLaunch.jar") == "jar-new2");
+    CHECK(!QFileInfo::exists(zstaged + "/blamdom-launcher-windows-x86_64"));  // top folder stripped
+    CHECK(validateStaged(zstaged, "app.exe", &err));
+    CHECK(!extractZip(root + "/update.tar.gz", root + "/zipjunk", &err));      // not a zip -> clean failure
+    CHECK(!extractZip(root + "/blob.bin", root + "/zipjunk2", &err));          // junk -> clean failure
+
+    // ---- Windows update bootstrap (the folder surgery)
+    // "win" is the canonical install dir; a staged sibling with a marker waits to take over
+    write(root + "/win/app.exe", "MZ-old");
+    write(root + "/win/lib.dll", "dll-old");
+    const QString wstaged = root + "/win.update";
+    write(wstaged + "/app.exe", "MZ-new");
+    write(wstaged + "/lib.dll", "dll-new");
+    write(wstaged + "/new.dll", "dll-added");
+    write(wstaged + "/" + pendingUpdateMarkerName(), root + "/win\n");
+    {
+        QString relaunchExe;
+        CHECK(applyPendingUpdate(wstaged, "app.exe", &relaunchExe, &err) == UpdateBootstrap::Completed);
+        CHECK(read(root + "/win/app.exe") == "MZ-new");    // new version now owns the canonical folder
+        CHECK(read(root + "/win/lib.dll") == "dll-new");
+        CHECK(read(root + "/win/new.dll") == "dll-added");
+        CHECK(!QFileInfo::exists(wstaged));                // staged folder renamed away
+        CHECK(!QFileInfo::exists(root + "/win.update-old"));  // old version removed
+        CHECK(!QFileInfo::exists(root + "/win/" + pendingUpdateMarkerName()));  // marker not carried over
+    }
+    // a pending sibling seen from the canonical dir asks for a relaunch into it
+    write(root + "/win/app.exe", "MZ-old2");
+    write(root + "/win.update/app.exe", "MZ-old3");
+    write(root + "/win.update/" + pendingUpdateMarkerName(), root + "/win\n");
+    {
+        QString relaunchExe;
+        CHECK(applyPendingUpdate(root + "/win", "app.exe", &relaunchExe, &err) == UpdateBootstrap::RelaunchNeeded);
+        CHECK(relaunchExe == root + "/win.update/app.exe");
+    }
+    // a stale sibling (no marker) is simply removed; then there is nothing to do
+    QDir(root + "/win.update").removeRecursively();
+    write(root + "/win.update/partial.bin", "x");
+    {
+        QString relaunchExe;
+        CHECK(applyPendingUpdate(root + "/win", "app.exe", &relaunchExe, &err) == UpdateBootstrap::Nothing);
+        CHECK(!QFileInfo::exists(root + "/win.update"));
+        CHECK(applyPendingUpdate(root + "/win", "app.exe", &relaunchExe, &err) == UpdateBootstrap::Nothing);
+    }
+    // copyIntoDir overwrites files, merges dirs, never carries the marker
+    write(root + "/src/a.txt", "src-a");
+    write(root + "/src/sub/b.txt", "src-b");
+    write(root + "/src/" + pendingUpdateMarkerName(), "marker");
+    write(root + "/dst/a.txt", "dst-a");
+    write(root + "/dst/keep.txt", "kept");
+    CHECK(copyIntoDir(root + "/src", root + "/dst", &err));
+    CHECK(read(root + "/dst/a.txt") == "src-a");
+    CHECK(read(root + "/dst/sub/b.txt") == "src-b");
+    CHECK(read(root + "/dst/keep.txt") == "kept");
+    CHECK(!QFileInfo::exists(root + "/dst/" + pendingUpdateMarkerName()));
+
     std::printf("\n%d passed, %d failed\n", g_pass, g_fail);
     return g_fail ? 1 : 0;
 }

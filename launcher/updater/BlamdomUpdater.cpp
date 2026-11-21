@@ -196,7 +196,11 @@ void BlamdomUpdater::handleRelease(const Release& release, bool userTriggered)
         qDebug() << "Update" << release.version << "was skipped by the user";
         return;
     }
+#if defined(Q_OS_WIN)
+    const auto asset = pickAsset(release, platformKey(), QStringLiteral(".zip"));
+#else
     const auto asset = pickAsset(release, platformKey(), QStringLiteral(".tar.gz"));
+#endif
     if (!asset) {
         qWarning() << "Release" << release.tag << "has no build for" << platformKey();
         if (userTriggered) {
@@ -289,7 +293,11 @@ void BlamdomUpdater::install(const Release& release, const Asset& asset)
         return;
     }
 
+#if defined(Q_OS_WIN)
+    auto* file = new QTemporaryFile(QDir::temp().filePath(QStringLiteral("blamdom-update-XXXXXX.zip")), this);
+#else
     auto* file = new QTemporaryFile(QDir::temp().filePath(QStringLiteral("blamdom-update-XXXXXX.tar.gz")), this);
+#endif
     if (!file->open()) {
         notify(tr("Update failed"), tr("Could not create a temporary file: %1").arg(file->errorString()), true);
         file->deleteLater();
@@ -350,10 +358,43 @@ void BlamdomUpdater::finishInstall(const QString& archivePath, const Asset& asse
         return;
     }
 
+    const QString exeName = QFileInfo(QCoreApplication::applicationFilePath()).fileName();
+
+#if defined(Q_OS_WIN)
+    // Windows cannot replace a running executable in place: stage the new version in a
+    // sibling folder, write the pending-update marker, and relaunch from the staged copy.
+    // The new process moves itself into the canonical folder at startup
+    // (BlamdomUpdate::applyPendingUpdate), keeping the user's shortcuts working.
+    const QString staging = m_installDir + QStringLiteral(".update");
+    QString err;
+    QDir(staging).removeRecursively();
+    if (!extractZip(archivePath, staging, &err) || !validateStaged(staging, exeName, &err)) {
+        QDir(staging).removeRecursively();
+        fail(err);
+        return;
+    }
+    {
+        QFile marker(QDir(staging).filePath(pendingUpdateMarkerName()));
+        if (!marker.open(QIODevice::WriteOnly)) {
+            QDir(staging).removeRecursively();
+            fail(tr("Could not write the update marker, so the update was discarded."));
+            return;
+        }
+        marker.write(QDir(m_installDir).absolutePath().toUtf8() + "\n");
+        marker.close();
+    }
+    qInfo() << "Windows update staged at" << staging << "- restarting from there";
+    QString relErr;
+    if (!relaunchLater(QDir(staging).filePath(exeName), 3, &relErr)) {
+        QDir(staging).removeRecursively();
+        fail(relErr);
+        return;
+    }
+    QCoreApplication::quit();
+#else
     const QString staging = m_installDir + QStringLiteral(".update-new");
     QString err;
     QDir(staging).removeRecursively();
-    const QString exeName = QFileInfo(QCoreApplication::applicationFilePath()).fileName();
     if (!extractTarGz(archivePath, staging, &err) || !validateStaged(staging, exeName, &err)) {
         QDir(staging).removeRecursively();
         fail(err);
@@ -376,4 +417,5 @@ void BlamdomUpdater::finishInstall(const QString& archivePath, const Asset& asse
     shArgs += args;
     QProcess::startDetached(QStringLiteral("/bin/sh"), shArgs);
     QCoreApplication::quit();
+#endif
 }

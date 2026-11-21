@@ -369,6 +369,31 @@ Application::Application(int& argc, char** argv) : QApplication(argc, argv)
         return;
     }
 
+    // Windows self-update bootstrap: this process may have been launched from the
+    // ".update" staging folder by an older version, or an older version may have left
+    // a pending update behind. Resolve that before anything else touches the install
+    // folder (in particular before the single-instance peer, which derives its name
+    // from the install path).
+#if defined(Q_OS_WIN)
+    {
+        QString relaunchExe, bootErr;
+        const auto boot = BlamdomUpdate::applyPendingUpdate(
+            QCoreApplication::applicationDirPath(),
+            QFileInfo(QCoreApplication::applicationFilePath()).fileName(), &relaunchExe, &bootErr);
+        if (boot == BlamdomUpdate::UpdateBootstrap::RelaunchNeeded) {
+            QString relErr;
+            if (BlamdomUpdate::relaunchLater(relaunchExe, 3, &relErr)) {
+                qInfo() << "A pending update is staged; relaunching from" << relaunchExe;
+                QCoreApplication::quit();
+                return;
+            }
+            qWarning() << "Pending update relaunch failed:" << relErr;
+        } else if (boot == BlamdomUpdate::UpdateBootstrap::Failed) {
+            qWarning() << "Pending update will be retried on the next start:" << bootErr;
+        }
+    }
+#endif
+
     QString origcwdPath = QDir::currentPath();
     QString binPath = applicationDirPath();
 

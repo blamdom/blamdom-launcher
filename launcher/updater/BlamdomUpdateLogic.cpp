@@ -28,6 +28,9 @@
 #include <QProcess>
 #include <QRegularExpression>
 #include <QSysInfo>
+#include <QTemporaryFile>
+#include <QThread>
+#include <QZipReader>
 #include <algorithm>
 
 namespace BlamdomUpdate {
@@ -174,16 +177,11 @@ bool canSelfUpdate(const QString& installDir, const QString& dataDir, bool porta
         }
         return false;
     };
-#if !defined(Q_OS_LINUX)
-    Q_UNUSED(installDir)
-    Q_UNUSED(dataDir)
-    Q_UNUSED(portable)
-    return no(QStringLiteral("Automatic installation is only available on Linux so far."));
-#else
-    const QFileInfo inst(installDir);
+#if defined(Q_OS_LINUX)
     if (installDir.startsWith(QStringLiteral("/tmp/.mount_"))) {
         return no(QStringLiteral("This is an AppImage; it cannot replace itself."));
     }
+#endif
     if (portable) {
         return no(QStringLiteral("This is a portable install (your data lives next to the program), so it must be updated by hand."));
     }
@@ -198,12 +196,21 @@ bool canSelfUpdate(const QString& installDir, const QString& dataDir, bool porta
     if (!canonData.isEmpty() && (canonData == canonInst || canonData.startsWith(canonInst + QLatin1Char('/')))) {
         return no(QStringLiteral("Your data is stored inside the install folder, so replacing it could delete your data."));
     }
+    const QFileInfo inst(installDir);
     if (!inst.isDir() || !inst.isWritable() || !QFileInfo(inst.absolutePath()).isWritable()) {
-        return no(QStringLiteral("%1 is not writable by your user (a system-wide install). Reinstall per-user, or run the installer again.")
+        return no(QStringLiteral("%1 is not writable by your user (a system-wide install). Reinstall per-user, or update from the download page.")
                       .arg(installDir));
     }
-    return true;
+#if defined(Q_OS_WIN)
+    // Windows stages the new version in a sibling folder next to the install, so the
+    // containing folder must be writable too (Program Files is not, without admin).
+    const QFileInfo parentDir(QFileInfo(inst.absoluteFilePath()).absolutePath());
+    if (!parentDir.isWritable()) {
+        return no(QStringLiteral("The folder that contains your install (%1) is not writable by your user, so the update cannot be staged next to it.")
+                      .arg(parentDir.absoluteFilePath()));
+    }
 #endif
+    return true;
 }
 
 bool extractTarGz(const QString& archive, const QString& destDir, QString* error)
@@ -271,6 +278,243 @@ void cleanupLeftovers(const QString& installDir)
             QDir(d).removeRecursively();
         }
     }
+}
+
+QString pendingUpdateMarkerName()
+{
+    return QStringLiteral("PENDING-BLAMDOM-UPDATE");
+}
+
+bool extractZip(const QString& archive, const QString& destDir, QString* error)
+{
+    auto fail = [error](const QString& msg) {
+        if (error) {
+            *error = msg;
+        }
+        return false;
+    };
+    QZipReader zip(archive);
+    if (zip.hasError()) {
+        return fail(QStringLiteral("Could not open the update archive: %1").arg(zip.errorString()));
+    }
+    const auto infos = zip.fileInfos();
+    // Our zips (like the release zips) have exactly one top-level folder; find it.
+    // PowerShell Compress-Archive writes backslash separators, so normalize first.
+    QString top;
+    for (const auto& fi : infos) {
+        const QString name = fi.name().replace('\\', '/');
+        const int slash = name.indexOf('/');
+        if (slash < 0) {
+            if (fi.isFile()) {
+                return fail(QStringLiteral("The update archive has files outside a top-level folder."));
+            }
+            continue;
+        }
+        const QString first = name.left(slash);
+        if (top.isEmpty()) {
+            top = first;
+        } else if (first != top) {
+            return fail(QStringLiteral("The update archive has more than one top-level folder."));
+        }
+    }
+    if (top.isEmpty()) {
+        return fail(QStringLiteral("The update archive is empty."));
+    }
+    QDir dest(destDir);
+    for (const auto& fi : infos) {
+        QString name = fi.name().replace('\\', '/');
+        const int slash = name.indexOf('/');
+        if (slash < 0) {
+            continue;  // the top-level folder entry itself
+        }
+        name = name.mid(slash + 1);
+        if (name.isEmpty() || name.contains(QLatin1String(".."))) {
+            return fail(QStringLiteral("The update archive contains an invalid path."));
+        }
+        const QString target = destDir + QLatin1Char('/') + name;
+        if (fi.isDir()) {
+            dest.mkpath(target);
+        } else if (fi.isFile()) {
+            QDir().mkpath(QFileInfo(target).absolutePath());
+            QIODevice* in = zip.open(fi);
+            if (!in) {
+                return fail(QStringLiteral("Could not read %1 from the archive.").arg(name));
+            }
+            {
+                QFile out(target);
+                if (!out.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+                    delete in;
+                    return fail(QStringLiteral("Could not write %1.").arg(name));
+                }
+                out.write(in->readAll());
+                out.close();
+            }
+            delete in;
+        }
+    }
+    return true;
+}
+
+static bool copyRecursive(const QString& srcDir, const QString& dstDir, QString* error)
+{
+    const QDir src(srcDir);
+    for (const auto& entry : src.entryList(QDir::AllEntries | QDir::NoDotAndDotDot, QDir::DirsFirst)) {
+        if (entry == pendingUpdateMarkerName()) {
+            continue;  // never carry the marker into the canonical folder
+        }
+        const QString s = src.filePath(entry);
+        const QString d = QDir(dstDir).filePath(entry);
+        if (QFileInfo(s).isDir()) {
+            QDir(d).mkpath(QStringLiteral("."));
+            if (!copyRecursive(s, d, error)) {
+                return false;
+            }
+        } else {
+            if (QFile::exists(d) && !QFile::remove(d)) {
+                if (error) {
+                    *error = QStringLiteral("Could not replace %1").arg(d);
+                }
+                return false;
+            }
+            if (!QFile::copy(s, d)) {
+                if (error) {
+                    *error = QStringLiteral("Could not copy %1 to %2").arg(s, d);
+                }
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+bool copyIntoDir(const QString& srcDir, const QString& dstDir, QString* error)
+{
+    if (!QDir(dstDir).exists() && !QDir(dstDir).mkpath(dstDir)) {
+        if (error) {
+            *error = QStringLiteral("Could not create %1").arg(dstDir);
+        }
+        return false;
+    }
+    return copyRecursive(srcDir, dstDir, error);
+}
+
+UpdateBootstrap applyPendingUpdate(const QString& installDir, const QString& exeName, QString* relaunchExe, QString* error)
+{
+    const QString markerPath = QDir(installDir).filePath(pendingUpdateMarkerName());
+    if (QFile::exists(markerPath)) {
+        // We are the staged instance: move into the canonical folder now that the old
+        // version's files are no longer in use.
+        QString oldDir;
+        {
+            QFile m(markerPath);
+            if (m.open(QIODevice::ReadOnly)) {
+                oldDir = QString::fromUtf8(m.readLine()).trimmed();
+            }
+        }
+        if (!oldDir.isEmpty() && QFileInfo(oldDir).isDir()) {
+            const QString oldBackup = oldDir + QStringLiteral(".update-old");
+            if (QFileInfo::exists(oldBackup)) {
+                QDir(oldBackup).removeRecursively();
+            }
+            // Renaming a folder works even while a process still runs from it, but a
+            // shutting-down instance may keep failing; retry briefly.
+            bool movedOld = false;
+            for (int attempt = 0; attempt < 5 && !movedOld; ++attempt) {
+                if (attempt > 0) {
+                    QThread::msleep(1500);
+                }
+                movedOld = QDir().rename(oldDir, oldBackup);
+            }
+            if (!movedOld) {
+                if (error) {
+                    *error = QStringLiteral("The old install folder %1 could not be moved aside (is an older version still running?). The update will be retried on the next start.")
+                                    .arg(oldDir);
+                }
+                return UpdateBootstrap::Failed;
+            }
+            if (!QDir().rename(installDir, oldDir)) {
+                QDir().rename(oldBackup, oldDir);  // roll the old version back into place
+                if (error) {
+                    *error = QStringLiteral("Could not move the new version into %1; the old version was restored and the update will be retried on the next start.")
+                                    .arg(oldDir);
+                }
+                return UpdateBootstrap::Failed;
+            }
+            // Best effort: remove the old version. Its files stay locked until the old
+            // process is really gone; whatever is left is cleaned on the next start.
+            for (int attempt = 0; attempt < 5; ++attempt) {
+                if (!QFileInfo::exists(oldBackup) || QDir(oldBackup).removeRecursively()) {
+                    break;
+                }
+                QThread::msleep(1000);
+            }
+            if (QFileInfo::exists(oldBackup)) {
+                qWarning() << "Old install folder left behind at" << oldBackup << "- it will be removed on the next start";
+            }
+        }
+        // After a successful rename the marker lives in the (now canonical) folder
+        QFile::remove(QDir(oldDir.isEmpty() ? installDir : oldDir).filePath(pendingUpdateMarkerName()));
+        qInfo() << "Self-update applied; the install is now at" << (oldDir.isEmpty() ? installDir : oldDir);
+        return UpdateBootstrap::Completed;
+    }
+    // Canonical instance: look for a staged sibling.
+    const QString sibling = installDir + QStringLiteral(".update");
+    if (QFileInfo::exists(sibling)) {
+        if (QFile::exists(QDir(sibling).filePath(pendingUpdateMarkerName()))) {
+            if (relaunchExe) {
+                *relaunchExe = QDir(sibling).filePath(exeName);
+            }
+            return UpdateBootstrap::RelaunchNeeded;
+        }
+        QDir(sibling).removeRecursively();  // partial stage from an interrupted update
+    }
+    return UpdateBootstrap::Nothing;
+}
+
+bool relaunchLater(const QString& exePath, int delaySeconds, QString* error)
+{
+    QString script;
+    QString process;
+    QStringList processArgs;
+#if defined(Q_OS_WIN)
+    const QString dir = QFileInfo(exePath).absolutePath();
+    script = QStringLiteral("@echo off\r\ncd /d \"%1\"\r\ntimeout /t %2 /nobreak >nul\r\nstart \"\" \"%3\"\r\n")
+                 .arg(dir)
+                 .arg(delaySeconds)
+                 .arg(exePath);
+    process = QStringLiteral("cmd");
+    processArgs = { QStringLiteral("/c") };
+#else
+    script = QStringLiteral("sleep %1; exec \"%2\"\n").arg(delaySeconds).arg(exePath);
+    process = QStringLiteral("/bin/sh");
+#endif
+    auto* f = new QTemporaryFile(QStringLiteral("blamdom-relaunch-XXXXXX.") + (process == "cmd" ? QStringLiteral("bat") : QStringLiteral("sh")));
+    if (!f->open()) {
+        if (error) {
+            *error = f->errorString();
+        }
+        f->deleteLater();
+        return false;
+    }
+    if (f->write(script.toUtf8()) < 0) {
+        if (error) {
+            *error = QStringLiteral("Could not write the relaunch script.");
+        }
+        f->remove();
+        f->deleteLater();
+        return false;
+    }
+    const QString path = f->fileName();
+    f->setAutoRemove(false);
+    f->deleteLater();  // the file itself stays until the OS cleans the temp dir
+    if (!QProcess::startDetached(process, processArgs + { path })) {
+        if (error) {
+            *error = QStringLiteral("Could not start the relaunch script %1").arg(path);
+        }
+        QFile::remove(path);
+        return false;
+    }
+    return true;
 }
 
 }  // namespace BlamdomUpdate

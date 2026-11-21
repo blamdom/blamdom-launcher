@@ -182,30 +182,30 @@ jobs:
         run: |
           # cmake --install brings the exe, the jars/, the Qt DLLs + plugins
           # (qt_deploy_runtime_dependencies) and the vcpkg dependency DLLs.
-          cmake --install build --config Release --prefix dist/blamdom-launcher-windows-x64
+          cmake --install build --config Release --prefix dist/blamdom-launcher-windows-x86_64
           # Brand the executable (the updater and docs refer to blamdom-launcher.exe)
-          mv dist/blamdom-launcher-windows-x64/prismlauncher.exe dist/blamdom-launcher-windows-x64/blamdom-launcher.exe
+          mv dist/blamdom-launcher-windows-x86_64/prismlauncher.exe dist/blamdom-launcher-windows-x86_64/blamdom-launcher.exe
           # Sanity: exe, jars and some DLLs must all be present
-          test -s dist/blamdom-launcher-windows-x64/blamdom-launcher.exe
-          test -s dist/blamdom-launcher-windows-x64/prismlauncher_filelink.exe
-          test -s dist/blamdom-launcher-windows-x64/jars/JavaCheck.jar
-          ls dist/blamdom-launcher-windows-x64
-          find dist/blamdom-launcher-windows-x64 -name "*.dll" | wc -l
+          test -s dist/blamdom-launcher-windows-x86_64/blamdom-launcher.exe
+          test -s dist/blamdom-launcher-windows-x86_64/prismlauncher_filelink.exe
+          test -s dist/blamdom-launcher-windows-x86_64/jars/JavaCheck.jar
+          ls dist/blamdom-launcher-windows-x86_64
+          find dist/blamdom-launcher-windows-x86_64 -name "*.dll" | wc -l
 
       - name: Package
         shell: bash
         run: |
-          powershell -Command "Compress-Archive -Path 'dist/blamdom-launcher-windows-x64' -DestinationPath 'blamdom-launcher-windows-x64.zip' -Force"
-          sha256sum blamdom-launcher-windows-x64.zip > SHA256SUMS
+          powershell -Command "Compress-Archive -Path 'dist/blamdom-launcher-windows-x86_64' -DestinationPath 'blamdom-launcher-windows-x86_64.zip' -Force"
+          sha256sum blamdom-launcher-windows-x86_64.zip > SHA256SUMS
           cat SHA256SUMS
-          ls -la blamdom-launcher-windows-x64.zip
+          ls -la blamdom-launcher-windows-x86_64.zip
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: blamdom-launcher-windows-x64
+          name: blamdom-launcher-windows-x86_64
           path: |
-            blamdom-launcher-windows-x64.zip
+            blamdom-launcher-windows-x86_64.zip
             SHA256SUMS
 
   publish:
@@ -243,7 +243,7 @@ jobs:
       - name: Merge checksums
         run: |
           cat release/blamdom-launcher-linux-x86_64/SHA256SUMS \
-              release/blamdom-launcher-windows-x64/SHA256SUMS > release/SHA256SUMS
+              release/blamdom-launcher-windows-x86_64/SHA256SUMS > release/SHA256SUMS
           cat release/SHA256SUMS
 
       - name: Publish GitHub release
@@ -251,7 +251,7 @@ jobs:
         with:
           files: |
             release/blamdom-launcher-linux-x86_64/blamdom-launcher-linux-x86_64.tar.gz
-            release/blamdom-launcher-windows-x64/blamdom-launcher-windows-x64.zip
+            release/blamdom-launcher-windows-x86_64/blamdom-launcher-windows-x86_64.zip
             release/SHA256SUMS
           fail_on_unmatched_files: true
           body: ${{ steps.notes.outputs.body }}
