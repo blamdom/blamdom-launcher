@@ -192,6 +192,17 @@ void V1::updateModIndex(const QDir& indexDir, Mod& mod)
                 { "version", mod.version().toString().toStdString() },
             };
             break;
+        case (ModPlatform::ResourceProvider::BLAMDOM):
+            // Same shape as Modrinth: our catalog id + the version at import time.
+            if (mod.modId().toString().isEmpty() || mod.version().toString().isEmpty()) {
+                qCritical() << QString("Did not write file %1 because missing information!").arg(normalizedFname);
+                return;
+            }
+            update = toml::table{
+                { "mod-id", mod.modId().toString().toStdString() },
+                { "version", mod.version().toString().toStdString() },
+            };
+            break;
     }
 
     toml::array loaders;
@@ -364,8 +375,15 @@ auto V1::getIndexForMod(const QDir& indexDir, const QString& slug) -> Mod
                 mod.modId() = stringEntry(*modProviderTable, "mod-id");
                 mod.version() = stringEntry(*modProviderTable, "version");
             } else {
-                qCritical() << QString("No mod provider on mod metadata!");
-                return {};
+                modProviderTable = updateTable[ModPlatform::ProviderCapabilities::name(Provider::BLAMDOM)].as_table();
+                if (modProviderTable != nullptr) {
+                    mod.provider = Provider::BLAMDOM;
+                    mod.modId() = stringEntry(*modProviderTable, "mod-id");
+                    mod.version() = stringEntry(*modProviderTable, "version");
+                } else {
+                    qCritical() << QString("No mod provider on mod metadata!");
+                    return {};
+                }
             }
         }
     }

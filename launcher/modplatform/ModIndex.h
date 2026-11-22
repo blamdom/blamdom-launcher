@@ -57,7 +57,7 @@ using enum ModLoaderType;
 Q_DECLARE_FLAGS(ModLoaderTypes, ModLoaderType)
 QList<ModLoaderType> modLoaderTypesToList(ModLoaderTypes flags);
 
-enum class ResourceProvider : std::uint8_t { MODRINTH, FLAME };
+enum class ResourceProvider : std::uint8_t { MODRINTH, FLAME, BLAMDOM };
 
 enum class DependencyTypeValue : std::uint8_t { REQUIRED, OPTIONAL, INCOMPATIBLE, EMBEDDED, TOOL, INCLUDE, UNKNOWN };
 struct DependencyType : EnumWrapper<DependencyType, DependencyTypeValue> {

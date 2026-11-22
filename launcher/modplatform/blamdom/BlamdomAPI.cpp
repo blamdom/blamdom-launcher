@@ -22,6 +22,7 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QTimer>
 
 #include "Application.h"
 #include "FileSystem.h"
@@ -30,7 +31,11 @@
 #include "QObjectPtr.h"
 #include "net/NetJob.h"
 #include "net/Request.h"
+#include "ui/dialogs/ProgressDialog.h"
 
+#include "minecraft/mod/Resource.h"
+
+#include <QDir>
 #include <QFile>
 #include <QRegularExpression>
 
@@ -93,38 +98,6 @@ QList<Blamdom::Pack> BlamdomAPI::parsePacks(const QByteArray& json)
     return packs;
 }
 
-QList<Blamdom::Mod> BlamdomAPI::parseMods(const QByteArray& json)
-{
-    QList<Mod> mods;
-
-    auto doc = Json::requireDocument(json);
-    if (!doc) {
-        qWarning() << "Blamdom: malformed mods.json:" << doc.error();
-        return mods;
-    }
-
-    const auto arr = doc->object()["mods"].toArray();
-    for (const auto& v : arr) {
-        const auto o = v.toObject();
-        Mod m;
-        m.name = o["name"].toString();
-        m.id = o["id"].toString();
-        m.version = o["version"].toString();
-        m.minecraft = o["minecraft"].toString();
-        m.loader = o["loader"].toString();
-        m.side = o["side"].toString();
-        m.description = o["description"].toString();
-        m.download = o["download"].toString();
-        m.sha256 = o["sha256"].toString();
-        m.sizeBytes = o["size_bytes"].toVariant().toLongLong();
-        m.released = o["released"].toString();
-        if (!m.name.isEmpty() && m.download.startsWith(QStringLiteral("https://"))) {
-            mods.append(m);
-        }
-    }
-    return mods;
-}
-
 QList<Blamdom::InstalledPack> BlamdomAPI::findInstalled(const QList<Pack>& livePacks)
 {
     QList<InstalledPack> out;
@@ -173,6 +146,89 @@ QList<Blamdom::InstalledPack> BlamdomAPI::findInstalled(const QList<Pack>& liveP
         }
     }
     return out;
+}
+
+// ---------------------------------------------------------------------------
+// Local resolution
+
+namespace {
+QList<Mod> s_mods;
+bool s_modsLoaded = false;     // a non-empty catalog was parsed
+bool s_modsAttempted = false;  // a fetch was attempted
+}  // namespace
+
+const QList<Mod>& BlamdomAPI::cachedMods()
+{
+    return s_mods;
+}
+
+bool BlamdomAPI::catalogIsLoaded()
+{
+    return s_modsLoaded;
+}
+
+bool BlamdomAPI::catalogAttempted()
+{
+    return s_modsAttempted;
+}
+
+void BlamdomAPI::setCachedMods(const QByteArray& json)
+{
+    s_mods = parseMods(json);
+    s_modsLoaded = !s_mods.isEmpty();
+    s_modsAttempted = true;
+}
+
+QList<Mod> BlamdomAPI::fetchModsSync(QWidget* parent)
+{
+    auto [job, response] = fetchMods();
+    if (!job) {
+        s_modsAttempted = true;
+        return {};
+    }
+
+    // Bound the wait: the catalog is a few KB, but the network is what it is.
+    QTimer timeout;
+    timeout.setSingleShot(true);
+    QObject::connect(&timeout, &QTimer::timeout, job.get(), &Task::abort);
+    timeout.start(15000);
+
+    ProgressDialog pg(parent);
+    pg.setWindowTitle(QObject::tr("Loading Blamdom catalog"));
+    pg.execWithTask(job.get());
+    timeout.stop();
+
+    if (!job->wasSuccessful()) {
+        s_modsAttempted = true;
+        return {};
+    }
+    setCachedMods(*response);
+    return s_mods;
+}
+
+void BlamdomAPI::writeModMetadata(const QDir& indexDir, Packwiz::V1::Mod& meta)
+{
+    if (!meta.isValid()) {
+        qCritical() << "Blamdom: refusing to write metadata for an invalid mod entry";
+        return;
+    }
+    FS::ensureFilePathExists(indexDir.absolutePath());
+    Packwiz::V1::updateModIndex(indexDir, meta);
+}
+
+bool BlamdomAPI::resolveCandidate(Resource* resource, const QDir& indexDir)
+{
+    if (!resource) {
+        return false;
+    }
+    const auto* mod = matchModFile(s_mods, resource->fileinfo().fileName());
+    if (!mod) {
+        return false;
+    }
+    auto meta = buildModMetadata(*mod, resource->fileinfo().fileName());
+    writeModMetadata(indexDir, meta);
+    resource->setMetadata(meta);
+    return true;
 }
 
 }  // namespace Blamdom

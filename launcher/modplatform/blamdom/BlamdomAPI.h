@@ -20,9 +20,19 @@
 
 #include <QByteArray>
 #include <QList>
+#include <QRegularExpression>
 #include <QString>
+#include <QUrl>
 
+#include <algorithm>
+
+#include "Json.h"
 #include "tasks/Task.h"
+
+#include "modplatform/packwiz/Packwiz.h"
+
+class Resource;
+class QWidget;
 
 namespace Blamdom {
 
@@ -89,7 +99,39 @@ class BlamdomAPI final {
     static QList<Pack> parsePacks(const QByteArray& json);
 
     //! Parse a /mods.json body. Returns an empty list on malformed input.
-    static QList<Mod> parseMods(const QByteArray& json);
+    //! (Inline on purpose: the catalog self-test links this without the rest
+    //! of BlamdomAPI.cpp.)
+    static QList<Mod> parseMods(const QByteArray& json)
+    {
+        QList<Mod> mods;
+
+        auto doc = Json::requireDocument(json);
+        if (!doc) {
+            qWarning() << "Blamdom: malformed mods.json:" << doc.error();
+            return mods;
+        }
+
+        const auto arr = doc->object()["mods"].toArray();
+        for (const auto& v : arr) {
+            const auto o = v.toObject();
+            Mod m;
+            m.name = o["name"].toString();
+            m.id = o["id"].toString();
+            m.version = o["version"].toString();
+            m.minecraft = o["minecraft"].toString();
+            m.loader = o["loader"].toString();
+            m.side = o["side"].toString();
+            m.description = o["description"].toString();
+            m.download = o["download"].toString();
+            m.sha256 = o["sha256"].toString();
+            m.sizeBytes = o["size_bytes"].toVariant().toLongLong();
+            m.released = o["released"].toString();
+            if (!m.name.isEmpty() && m.download.startsWith(QStringLiteral("https://"))) {
+                mods.append(m);
+            }
+        }
+        return mods;
+    }
 
     //! Scan local instances for imports of one of our live packs (matched by
     //! the pack name stored in the instance's kept copy of the pack index).
@@ -99,6 +141,170 @@ class BlamdomAPI final {
     //! a trailing " (working title)" dropped (early builds used it, so old
     //! installs keep matching the same pack after the name settled).
     static QString normalizePackName(const QString& name);
+
+    // ------------------------------------------------------------------
+    // Mod catalog matching — pure logic, no I/O, unit-tested in
+    // tests/blamdom-catalog.
+    // ------------------------------------------------------------------
+
+    //! Version part of a "mod file name": "<id>-<version>.jar" (optionally with
+    //! a trailing ".disabled"), lowercased. Returns the version
+    //! (e.g. "0.1.7"), or empty if the name is not of that shape.
+    static QString modFileVersion(const QString& modId, const QString& fileName)
+    {
+        if (modId.isEmpty()) {
+            return {};
+        }
+        const QString lower = fileName.toLower();
+        const QString prefix = modId.toLower() + QLatin1Char('-');
+        if (!lower.startsWith(prefix)) {
+            return {};
+        }
+        QString rest = lower.mid(prefix.size());
+        if (rest.endsWith(QStringLiteral(".disabled"))) {
+            rest.chop(QStringLiteral(".disabled").size());
+        }
+        // Only jars: the mods folder can hold other files that must never
+        // false-positive against one of our catalog ids.
+        if (!rest.endsWith(QStringLiteral(".jar"))) {
+            return {};
+        }
+        rest.chop(QStringLiteral(".jar").size());
+        if (rest.isEmpty()) {
+            return {};
+        }
+        // Version-ish: digits, letters, '.', '-', '+' (e.g. 0.1.7, 1.0-beta).
+        for (const QChar c : rest) {
+            if (!(c.isDigit() || c.isLetter() || c == QLatin1Char('.') || c == QLatin1Char('-') || c == QLatin1Char('+'))) {
+                return {};
+            }
+        }
+        return rest;
+    }
+
+    //! Match a mod file name to a catalog entry: the (lowercased) file name
+    //! must start with "<id>-" for exactly one entry — an id that is a prefix
+    //! of a longer id can never match, because the '-' has to come right after
+    //! the id — and the remainder must look like a version.
+    //! Returns the matching entry, or nullptr.
+    static const Mod* matchModFile(const QList<Mod>& mods, const QString& fileName)
+    {
+        if (fileName.isEmpty()) {
+            return nullptr;
+        }
+        for (const auto& m : mods) {
+            if (modFileVersion(m.id, fileName).isEmpty()) {
+                continue;
+            }
+            return &m;
+        }
+        return nullptr;
+    }
+
+    //! Segment-wise numeric version comparison: isNewerVersion("0.1.7", "0.1.1") is
+    //! true, ("0.10.0", "0.9.0") is true, ("1.0", "1.0-beta") is true (a
+    //! non-numeric tail segment is a prerelease marker and sorts lower),
+    //! ("1.0.1", "1.0") is true. Equal or unparseable inputs are never "newer".
+    static bool isNewerVersion(const QString& candidate, const QString& installed)
+    {
+        auto split = [](const QString& v) { return v.split(QRegularExpression(QStringLiteral("[.-]")), Qt::SkipEmptyParts); };
+        auto isNum = [](const QString& s) { return !s.isEmpty() && std::all_of(s.begin(), s.end(), [](QChar c) { return c.isDigit(); }); };
+
+        const auto a = split(candidate);
+        const auto b = split(installed);
+        for (qsizetype i = 0; i < qMax<qsizetype>(a.size(), b.size()); ++i) {
+            const QString sa = i < a.size() ? a[i] : QString();
+            const QString sb = i < b.size() ? b[i] : QString();
+            const bool an = isNum(sa);
+            const bool bn = isNum(sb);
+            if (an && bn) {
+                const long long x = sa.toLongLong();
+                const long long y = sb.toLongLong();
+                if (x != y) {
+                    return x > y;
+                }
+                continue;
+            }
+            if (an != bn) {
+                // A numeric segment is newer than a prerelease tag or a missing one:
+                // 1.0.1 > 1.0, 1.0-1 > 1.0-beta.
+                return an;
+            }
+            if (sa != sb) {
+                // Both non-numeric: a missing segment beats a prerelease tag
+                // (1.0 > 1.0-beta), otherwise plain lexicographic.
+                if (sa.isEmpty()) {
+                    return true;
+                }
+                if (sb.isEmpty()) {
+                    return false;
+                }
+                return sa > sb;
+            }
+        }
+        return false;
+    }
+
+    //! True if the URL points at our own host over https (the only place we
+    //! claim to host files from).
+    static bool isProdHost(const QUrl& url) { return url.scheme() == QLatin1String("https") && url.host() == QUrl(PROD_URL).host(); }
+
+    //! Build a .pw.toml metadata entry for one of our mods (provider = BLAMDOM).
+    //! `fileName` is the file name as it sits in the instance's mods folder.
+    static Packwiz::V1::Mod buildModMetadata(const Mod& mod, const QString& fileName)
+    {
+        using namespace ModPlatform;
+        Packwiz::V1::Mod meta;
+        meta.slug = mod.id;
+        meta.name = mod.name;
+        meta.filename = fileName;
+        meta.mode = QStringLiteral("url");
+        meta.url = QUrl(mod.download);
+        meta.hashFormat = QStringLiteral("sha256");
+        meta.hash = mod.sha256;
+        meta.provider = ResourceProvider::BLAMDOM;
+        meta.projectId = mod.id;
+        meta.fileId = mod.version;  // the catalog version at import/update time
+        meta.versionNumber = mod.version;
+        meta.side = mod.side == QStringLiteral("client")   ? SideType::ClientSide
+                    : mod.side == QStringLiteral("server") ? SideType::ServerSide
+                                                           : SideType::UniversalSide;
+        meta.loaders = mod.loader == QStringLiteral("quilt") ? ModLoaderTypes(ModLoaderType::Quilt) : ModLoaderTypes(ModLoaderType::Fabric);
+        if (!mod.minecraft.isEmpty()) {
+            meta.mcVersions = { mod.minecraft };
+        }
+        meta.releaseType = IndexedVersionType::Release;
+        meta.lockUpdate = false;
+        return meta;
+    }
+
+    // ------------------------------------------------------------------
+    // Local resolution — writes metadata next to mod files, keeps the
+    // in-memory catalog cache. Callers: pack import, the Blamdom section,
+    // and the update-check dialog (which never prompts for our own mods).
+    // ------------------------------------------------------------------
+
+    //! The catalog currently held in memory (empty until one of the fetchers runs).
+    static const QList<Mod>& cachedMods();
+    //! A non-empty catalog was parsed at least once.
+    static bool catalogIsLoaded();
+    //! A catalog fetch was attempted at least once (so a failed fetch is not retried in a tight loop).
+    static bool catalogAttempted();
+    //! Parse a /mods.json response body and install it as the in-memory catalog.
+    static void setCachedMods(const QByteArray& json);
+    //! Fetch /mods.json and block until it is done (bounded by a timeout, UI kept
+    //! responsive in a progress dialog) — for synchronous flows like the
+    //! update-check dialog. Returns the parsed list (empty on failure).
+    static QList<Mod> fetchModsSync(QWidget* parent);
+
+    //! Write `meta` as "<slug>.pw.toml" in `indexDir` (the mod folder's .index dir).
+    static void writeModMetadata(const QDir& indexDir, Packwiz::V1::Mod& meta);
+
+    //! If `resource`'s file name matches the in-memory catalog, write BLAMDOM
+    //! metadata for it into `indexDir`, attach the metadata to the resource,
+    //! and return true. Returns false for files that are not one of ours —
+    //! callers then keep the stock provider flow.
+    static bool resolveCandidate(Resource* resource, const QDir& indexDir);
 };
 
 }  // namespace Blamdom
