@@ -346,12 +346,20 @@ void ResourceDownloadDialog::setResourceMetadata(const std::shared_ptr<Metadata:
         case ModPlatform::ResourceProvider::FLAME:
             selectPage(Flame::id());
             break;
+        case ModPlatform::ResourceProvider::BLAMDOM:
+            // Our own mods have no version-browsing page here — they are
+            // updated in place from the Blamdom section (and "Change version"
+            // on the mods page handles them directly, before opening this dialog).
+            break;
     }
 
     setWindowTitle(tr("Change %1 version").arg(meta->name));
     m_container->hidePageList();
     m_buttons.hide();
     auto* page = selectedPage();
+    if (page == nullptr) {
+        return;  // nothing to browse for this provider
+    }
     page->openProject(meta->projectId);
 }
 

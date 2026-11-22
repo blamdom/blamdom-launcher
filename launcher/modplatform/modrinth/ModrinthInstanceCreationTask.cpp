@@ -272,6 +272,11 @@ void ModrinthCreationTask::createInstance()
             d.mod_id = filePath;
             mod->setDetails(d);
             m_resources.insert(file.hash.toHex(), mod);
+            // Remember where this file is downloaded from, so the metadata step
+            // can recognize our own mods by host as well as by file name.
+            if (!file.downloads.isEmpty()) {
+                m_modUrls.insert(fileName.mid(5), file.downloads.front());
+            }
         }
         if (file.downloads.empty()) {
             emitFailed(tr("The file '%1' is missing a download link. This is invalid in the pack format.").arg(fileName));
@@ -445,8 +450,65 @@ bool ModrinthCreationTask::parseManifest(const QString& indexPath, std::vector<F
 
 void ModrinthCreationTask::ensureMetaLoop()
 {
+    // Blamdom: our own mods are not published on Modrinth, so the stock
+    // Modrinth lookup can never find them — they would be left with "Unknown"
+    // provider. Fetch our catalog once and resolve them against it instead.
+    // (The fetch is best-effort: if it fails, everything falls back to the
+    // stock flow exactly as before.)
+    auto [modsJob, modsResponse] = Blamdom::BlamdomAPI::fetchMods();
+    if (!modsJob) {
+        blamdomMetaDone({});
+        return;
+    }
+    connect(modsJob.get(), &NetJob::succeeded, this,
+            [this, modsResponse] { blamdomMetaDone(Blamdom::BlamdomAPI::parseMods(std::move(*modsResponse))); });
+    connect(modsJob.get(), &Task::failed, this, [this](const QString& reason) {
+        qDebug() << "Blamdom: mods manifest unavailable, falling back to Modrinth metadata:" << reason;
+        blamdomMetaDone({});
+    });
+    connect(modsJob.get(), &Task::aborted, this, &ModrinthCreationTask::emitAborted);
+    m_task = modsJob;
+    m_modsJob = modsJob;
+    setStatus(tr("Loading Blamdom catalog..."));
+    modsJob->start();
+}
+
+void ModrinthCreationTask::blamdomMetaDone(QList<Blamdom::Mod> catalog)
+{
+    m_modsJob.reset();
+
     const QDir folder = FS::PathCombine(m_newInstance->modsRoot(), ".index");
-    auto ensureMetadataTask = makeShared<EnsureMetadataTask>(m_resources, folder, ModPlatform::ResourceProvider::MODRINTH);
+    const QString modsRoot = m_newInstance->modsRoot();
+
+    QList<Resource*> stock;
+    for (auto* resource : m_resources) {
+        const auto abs = resource->fileinfo().absoluteFilePath();
+        // Relative to the mods folder, normalized to '/' (mrpack paths use '/';
+        // Windows absolute paths use '\\').
+        QString rel = resource->fileinfo().fileName();
+        if (abs.startsWith(modsRoot)) {
+            rel = abs.mid(modsRoot.size());
+            while (rel.startsWith(QLatin1Char('/')) || rel.startsWith(QLatin1Char('\\'))) {
+                rel.remove(0, 1);
+            }
+        }
+        rel.replace(QLatin1Char('\\'), QLatin1Char('/'));
+        const auto* mod = Blamdom::BlamdomAPI::matchModFile(catalog, resource->fileinfo().fileName());
+        if (mod && Blamdom::BlamdomAPI::isProdHost(m_modUrls.value(rel))) {
+            auto meta = Blamdom::BlamdomAPI::buildModMetadata(*mod, resource->fileinfo().fileName());
+            Blamdom::BlamdomAPI::writeModMetadata(folder, meta);
+            resource->setMetadata(meta);
+            continue;
+        }
+        stock.append(resource);
+    }
+
+    if (stock.isEmpty()) {
+        finishInstall();
+        return;
+    }
+
+    auto ensureMetadataTask = makeShared<EnsureMetadataTask>(stock, folder, ModPlatform::ResourceProvider::MODRINTH);
     ensureMetadataTask->setUpdateLock(true);
     connect(ensureMetadataTask.get(), &Task::succeeded, this, &ModrinthCreationTask::finishInstall);
     connect(ensureMetadataTask.get(), &Task::failed, this, &ModrinthCreationTask::emitFailed);

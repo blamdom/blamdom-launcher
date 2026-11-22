@@ -4,6 +4,9 @@
 
 #include <QByteArray>
 #include <QCryptographicHash>
+#include <QHash>
+#include <QList>
+#include <QMap>
 #include <QQueue>
 #include <QString>
 #include <QUrl>
@@ -11,6 +14,7 @@
 
 #include "BaseInstance.h"
 #include "InstanceTask.h"
+#include "modplatform/blamdom/BlamdomAPI.h"
 
 class Resource;
 
@@ -46,7 +50,11 @@ class ModrinthCreationTask final : public InstanceTask {
    private:
     bool parseManifest(const QString&, std::vector<File>&, bool setInternalData = true, bool showOptionalDialog = true);
 
+    //! Fetch our /mods.json once, then finish the metadata step: files that are
+    //! ours get Blamdom provider metadata written locally, the rest go through
+    //! the stock Modrinth lookup as before.
     void ensureMetaLoop();
+    void blamdomMetaDone(QList<Blamdom::Mod> catalog);
     void setManagedPack(BaseInstance* instance);
 
     [[nodiscard]] bool promptForUntrustedMods();
@@ -67,4 +75,9 @@ class ModrinthCreationTask final : public InstanceTask {
     QString m_rootPath = "minecraft";
 
     QHash<QString, Resource*> m_resources;
+
+    //! Primary download URL per mod file (relative to the mods folder), so the
+    //! metadata step can tell which files came from our own host.
+    QMap<QString, QUrl> m_modUrls;
+    Task::Ptr m_modsJob;
 };
