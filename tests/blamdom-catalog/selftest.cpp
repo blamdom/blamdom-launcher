@@ -9,6 +9,7 @@
 #include <QCoreApplication>
 #include <QDir>
 #include <QFile>
+#include <QJsonDocument>
 #include <QTemporaryDir>
 #include <cstdio>
 
@@ -184,6 +185,35 @@ int main(int argc, char** argv)
     {
         const auto cfMeta = BlamdomAPI::buildModMetadata(mods[2], "cozyfixes-0.1.1.jar");
         CHECK(cfMeta.side == ModPlatform::SideType::ClientSide);  // side: "client"
+    }
+
+    // ---- pack index identity (findInstalled's detection input)
+    {
+        QString n, v;
+        // real shape: name + versionId
+        CHECK(BlamdomAPI::indexIdentity(
+                  QJsonDocument::fromJson(R"({"formatVersion":1,"game":"minecraft","name":"Our Cozy Pack","versionId":"0.3.1-beta.3"})")
+                      .object(),
+                  n, v));
+        CHECK(n == "Our Cozy Pack");
+        CHECK(v == "0.3.1-beta.3");
+        // hand-made index: no versionId is legal (update flow works without it)
+        CHECK(BlamdomAPI::indexIdentity(QJsonDocument::fromJson(R"({"name":"Cozy (working title)"})").object(), n, v));
+        CHECK(n == "Cozy (working title)");
+        CHECK(v.isEmpty());
+        // whitespace trimmed
+        CHECK(BlamdomAPI::indexIdentity(QJsonDocument::fromJson(R"({"name":  "  Padded Name  ", "versionId":" 1.0 "})").object(), n, v));
+        CHECK(n == "Padded Name");
+        CHECK(v == "1.0");
+        // missing / empty name: not a pack index
+        CHECK(!BlamdomAPI::indexIdentity(QJsonDocument::fromJson(R"({"versionId":"1.0"})").object(), n, v));
+        CHECK(!BlamdomAPI::indexIdentity(QJsonDocument::fromJson(R"({"name":"  "})").object(), n, v));
+        CHECK(!BlamdomAPI::indexIdentity(QJsonDocument::fromJson(R"({"name":42})").object(), n, v));
+
+        // name normalization keeps early installs matching after the name settled
+        CHECK(BlamdomAPI::normalizePackName("Our Cozy Pack (working title)") == "our cozy pack");
+        CHECK(BlamdomAPI::normalizePackName("  OUR COZY PACK ") == "our cozy pack");
+        CHECK(BlamdomAPI::normalizePackName("Our Cozy Pack") == "our cozy pack");
     }
 
     // ---- write/read round-trip (real Packwiz code)

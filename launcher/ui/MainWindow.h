@@ -180,6 +180,10 @@ class MainWindow : public QMainWindow {
 
     void showInstanceContextMenu(const QPoint&);
 
+    //! Instance context menu: check mine.blamdom.dev for a newer version of
+    //! this instance's pack and update it in place (saves/settings kept).
+    void checkAndUpdateBlamdomPack(BaseInstance* inst);
+
     void updateMainToolBar();
 
     void updateLaunchButton();

@@ -19,6 +19,7 @@
 #pragma once
 
 #include <QByteArray>
+#include <QJsonObject>
 #include <QList>
 #include <QRegularExpression>
 #include <QString>
@@ -52,15 +53,17 @@ struct Pack {
 
 //! A pack of ours installed locally.
 //!
-//! Detected from the copy of the pack index the stock Modrinth import keeps
-//! inside every imported instance (mrpack/modrinth.index.json) — its `name`
-//! and `versionId` fields are ours, so no extra bookkeeping is needed to know
-//! which local instances came from Blamdom.
+//! Detected, in order, from: (1) the copy of the pack index the Modrinth
+//! import keeps inside the instance (mrpack/modrinth.index.json, or at the
+//! instance root for older installs), (2) the instance's own managed-pack
+//! settings (written by every import), (3) the instance's display name
+//! matching a live pack (old or foreign installs; the version is then
+//! unknown, but the in-place update works without it).
 struct InstalledPack {
     QString instanceId;
     QString instanceName;
     QString packName;
-    QString installedVersion;
+    QString installedVersion;  //!< may be empty (name-only match)
 };
 
 //! One entry from /mods.json
@@ -133,14 +136,31 @@ class BlamdomAPI final {
         return mods;
     }
 
-    //! Scan local instances for imports of one of our live packs (matched by
-    //! the pack name stored in the instance's kept copy of the pack index).
+    //! Scan local instances for imports of one of our live packs. Detection
+    //! falls back through the index file, the instance's managed-pack
+    //! settings, and the instance name — so old installs (different index
+    //! location or missing) and hand-installed packs are still recognized.
     static QList<InstalledPack> findInstalled(const QList<Pack>& livePacks);
 
     //! Canonical form of a pack name for matching: trimmed, lowercased, with
     //! a trailing " (working title)" dropped (early builds used it, so old
     //! installs keep matching the same pack after the name settled).
     static QString normalizePackName(const QString& name);
+
+    //! The (name, versionId) pair a modrinth.index.json body carries. Returns
+    //! false if the object has no usable pack name; versionId may
+    //! legitimately be empty (hand-made indexes). Pure — unit-tested in
+    //! tests/blamdom-catalog.
+    static bool indexIdentity(const QJsonObject& o, QString& name, QString& versionId)
+    {
+        const QString n = o.value("name").toString().trimmed();
+        if (n.isEmpty()) {
+            return false;
+        }
+        name = n;
+        versionId = o.value("versionId").toString().trimmed();
+        return true;
+    }
 
     // ------------------------------------------------------------------
     // Mod catalog matching — pure logic, no I/O, unit-tested in
@@ -296,6 +316,9 @@ class BlamdomAPI final {
     //! responsive in a progress dialog) — for synchronous flows like the
     //! update-check dialog. Returns the parsed list (empty on failure).
     static QList<Mod> fetchModsSync(QWidget* parent);
+
+    //! Same, for /modpacks.json — the instance context menu's update flow.
+    static QList<Pack> fetchPacksSync(QWidget* parent);
 
     //! Write `meta` as "<slug>.pw.toml" in `indexDir` (the mod folder's .index dir).
     static void writeModMetadata(const QDir& indexDir, Packwiz::V1::Mod& meta);

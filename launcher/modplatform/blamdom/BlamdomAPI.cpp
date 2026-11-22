@@ -105,6 +105,33 @@ QList<Blamdom::InstalledPack> BlamdomAPI::findInstalled(const QList<Pack>& liveP
         return out;
     }
 
+    auto matchLive = [&livePacks](const QString& name) -> const Pack* {
+        if (name.trimmed().isEmpty()) {
+            return nullptr;
+        }
+        const auto norm = normalizePackName(name);
+        for (const auto& live : livePacks) {
+            if (normalizePackName(live.name) == norm) {
+                return &live;
+            }
+        }
+        return nullptr;
+    };
+
+    //! Read one copy of the pack index the import keeps in the instance.
+    auto readIndexFile = [](const QString& path, QString& name, QString& versionId) {
+        QFile f(path);
+        if (!f.open(QIODevice::ReadOnly)) {
+            return false;
+        }
+        auto doc = QJsonDocument::fromJson(f.readAll());
+        f.close();
+        if (!doc.isObject()) {
+            return false;
+        }
+        return indexIdentity(doc.object(), name, versionId);
+    };
+
     auto* instances = APPLICATION->instances();
     for (int i = 0; i < instances->count(); ++i) {
         auto* inst = instances->at(i);
@@ -112,38 +139,40 @@ QList<Blamdom::InstalledPack> BlamdomAPI::findInstalled(const QList<Pack>& liveP
             continue;
         }
 
-        // The stock Modrinth import keeps the pack index it installed from at
-        // <instance>/mrpack/modrinth.index.json — with our pack's name and
-        // versionId inside.
-        QFile f(FS::PathCombine(inst->instanceRoot(), "mrpack", "modrinth.index.json"));
-        if (!f.open(QIODevice::ReadOnly)) {
-            continue;
+        QString name;      // what the instance says it was installed from
+        QString versionId; // may stay empty (then the update flow still works)
+
+        // (1) The copy of the pack index kept inside the instance:
+        //     mrpack/modrinth.index.json — with the instance root as the
+        //     fallback location for very old installs.
+        if (!readIndexFile(FS::PathCombine(inst->instanceRoot(), "mrpack", "modrinth.index.json"), name, versionId)) {
+            readIndexFile(FS::PathCombine(inst->instanceRoot(), "modrinth.index.json"), name, versionId);
         }
-        auto doc = QJsonDocument::fromJson(f.readAll());
-        f.close();
-        if (!doc.isObject()) {
-            continue;
+        // (2) The instance's own managed-pack settings (written by every
+        //     import the launcher performed; survives a lost index file).
+        if (name.isEmpty() && inst->getManagedPackType() == QLatin1String("modrinth") && !inst->getManagedPackName().isEmpty()) {
+            name = inst->getManagedPackName();
+            versionId = inst->getManagedPackVersionID();
         }
-        const auto o = doc.object();
-        const QString packName = o["name"].toString();
-        const QString installedVersion = o["versionId"].toString();
-        if (packName.isEmpty() || installedVersion.isEmpty()) {
+        // (3) Last resort: an instance whose display name is one of our pack
+        //     names (installed by an older launcher or another tool).
+        if (name.isEmpty() && matchLive(inst->name())) {
+            name = inst->name();
+        }
+
+        const auto* live = matchLive(name);
+        if (!live) {
             continue;
         }
 
-        for (const auto& live : livePacks) {
-            if (normalizePackName(live.name) == normalizePackName(packName)) {
-                InstalledPack ip;
-                ip.instanceId = inst->id();
-                ip.instanceName = inst->name();
-                // Store the live pack's canonical name so callers can match it
-                // straight against the manifest without re-normalizing.
-                ip.packName = live.name;
-                ip.installedVersion = installedVersion;
-                out.append(ip);
-                break;
-            }
-        }
+        InstalledPack ip;
+        ip.instanceId = inst->id();
+        ip.instanceName = inst->name();
+        // Store the live pack's canonical name so callers can match it
+        // straight against the manifest without re-normalizing.
+        ip.packName = live->name;
+        ip.installedVersion = versionId;
+        out.append(ip);
     }
     return out;
 }
@@ -204,6 +233,29 @@ QList<Mod> BlamdomAPI::fetchModsSync(QWidget* parent)
     }
     setCachedMods(*response);
     return s_mods;
+}
+
+QList<Pack> BlamdomAPI::fetchPacksSync(QWidget* parent)
+{
+    auto [job, response] = fetchPacks();
+    if (!job) {
+        return {};
+    }
+
+    QTimer timeout;
+    timeout.setSingleShot(true);
+    QObject::connect(&timeout, &QTimer::timeout, job.get(), &Task::abort);
+    timeout.start(15000);
+
+    ProgressDialog pg(parent);
+    pg.setWindowTitle(QObject::tr("Loading Blamdom packs"));
+    pg.execWithTask(job.get());
+    timeout.stop();
+
+    if (!job->wasSuccessful()) {
+        return {};
+    }
+    return parsePacks(std::move(*response));
 }
 
 void BlamdomAPI::writeModMetadata(const QDir& indexDir, Packwiz::V1::Mod& meta)

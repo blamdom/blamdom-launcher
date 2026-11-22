@@ -336,13 +336,18 @@ void BlamdomPage::updatePackStatus()
     QString line;
     if (installed.instanceId.isEmpty()) {
         line = tr("<b>Not installed yet</b> — select it and press OK to install.");
-    } else if (installed.installedVersion == m_selected.version) {
+    } else if (!installed.installedVersion.isEmpty() && installed.installedVersion == m_selected.version) {
         line = tr("<b>Installed</b>: v%1 on “%2” — up to date.")
                    .arg(installed.installedVersion.toHtmlEscaped(), installed.instanceName.toHtmlEscaped());
     } else {
-        line = tr("<b>Installed</b>: v%1 on “%2” — <b>v%3</b> is available.")
-                   .arg(installed.installedVersion.toHtmlEscaped(), installed.instanceName.toHtmlEscaped(),
-                        m_selected.version.toHtmlEscaped());
+        // Behind the live catalog — or installed so the launcher lost track of
+        // the version (old install, foreign import). The in-place update
+        // works in both cases.
+        const QString old = installed.installedVersion.isEmpty()
+                                ? tr("version unknown")
+                                : tr("v%1").arg(installed.installedVersion.toHtmlEscaped());
+        line = tr("<b>Installed</b>: %1 on “%2” — <b>v%3</b> is available.")
+                   .arg(old, installed.instanceName.toHtmlEscaped(), m_selected.version.toHtmlEscaped());
         m_ui->updateButton->setVisible(true);
         m_ui->updateButton->setText(tr("Update to v%1").arg(m_selected.version));
     }

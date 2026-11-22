@@ -62,6 +62,7 @@
 #include <QKeyEvent>
 #include <QLabel>
 #include <QMainWindow>
+#include <QMap>
 #include <QMenu>
 #include <QMenuBar>
 #include <QMessageBox>
@@ -78,6 +79,7 @@
 #include <BaseInstance.h>
 #include <BuildConfig.h>
 #include <DesktopServices.h>
+#include <InstanceImportTask.h>
 #include <InstanceList.h>
 #include <MMCZip.h>
 #include <icons/IconList.h>
@@ -111,6 +113,7 @@
 #include "ui/themes/ITheme.h"
 #include "ui/themes/ThemeManager.h"
 #include "ui/widgets/EditableLabel.h"
+#include "modplatform/blamdom/BlamdomAPI.h"
 
 #include "minecraft/PackProfile.h"
 #include "minecraft/VersionFile.h"
@@ -578,6 +581,22 @@ void MainWindow::showInstanceContextMenu(const QPoint& pos)
         auto* actionVoid = new QAction(m_selectedInstance->name(), menu);
         actionVoid->setEnabled(false);
         actions.prepend(actionVoid);
+
+        // Blamdom: direct in-place update for instances that came from our
+        // site. The live catalog is checked when the item is clicked, so
+        // building the menu stays instant. (A fresh separator: actionSep is
+        // already used for the header above.)
+        auto* actionBlamdomSep = new QAction("", menu);
+        actionBlamdomSep->setSeparator(true);
+        auto* actionBlamdomHeader = new QAction(tr("Blamdom pack"), menu);
+        actionBlamdomHeader->setEnabled(false);
+        auto* actionBlamdomUpdate = new QAction(tr("Update pack from Blamdom…"), menu);
+        actionBlamdomUpdate->setToolTip(tr("Check mine.blamdom.dev for a newer version of this pack and update it in "
+                                           "place — saves and settings are kept."));
+        connect(actionBlamdomUpdate, &QAction::triggered, this, [this] { checkAndUpdateBlamdomPack(m_selectedInstance); });
+        actions.append(actionBlamdomSep);
+        actions.append(actionBlamdomHeader);
+        actions.append(actionBlamdomUpdate);
     } else {
         auto group = view->groupNameAt(pos);
 
@@ -619,6 +638,108 @@ void MainWindow::showInstanceContextMenu(const QPoint& pos)
     }
     menu->addActions(actions);
     menu->popup(view->mapToGlobal(pos));
+}
+
+void MainWindow::checkAndUpdateBlamdomPack(BaseInstance* inst)
+{
+    if (!inst) {
+        return;
+    }
+
+    // Fetch the live pack catalog (bounded wait, progress dialog).
+    auto packs = Blamdom::BlamdomAPI::fetchPacksSync(this);
+    if (packs.isEmpty()) {
+        CustomMessageBox::selectable(this, tr("Blamdom packs unavailable"),
+                                     tr("Couldn't load the pack list from <b>mine.blamdom.dev</b>.<br>Check your connection and try again."),
+                                     QMessageBox::Warning)
+            ->show();
+        return;
+    }
+
+    // Match this instance against the live packs (index file, managed-pack
+    // settings, or display name — see BlamdomAPI::findInstalled).
+    Blamdom::InstalledPack installed;
+    for (const auto& ip : Blamdom::BlamdomAPI::findInstalled(packs)) {
+        if (ip.instanceId == inst->id()) {
+            installed = ip;
+            break;
+        }
+    }
+    if (installed.instanceId.isEmpty()) {
+        CustomMessageBox::selectable(this, tr("Not a Blamdom pack"),
+                                     tr("This instance doesn't look like one of our packs, so there is nothing to update here.<br><br>"
+                                        "Install the pack from the Blamdom section of the New Instance dialog and it "
+                                        "will be tracked — updates are then offered right here."),
+                                     QMessageBox::Information)
+            ->show();
+        return;
+    }
+
+    const Blamdom::Pack* live = nullptr;
+    for (const auto& p : packs) {
+        if (p.name == installed.packName) {
+            live = &p;
+            break;
+        }
+    }
+    if (!live) {
+        return;
+    }
+
+    if (!installed.installedVersion.isEmpty() && installed.installedVersion == live->version) {
+        CustomMessageBox::selectable(this, tr("Pack up to date"),
+                                     tr("<b>%1</b> is on v%2 — the newest published version.")
+                                         .arg(installed.packName.toHtmlEscaped(), live->version.toHtmlEscaped()),
+                                     QMessageBox::Information)
+            ->show();
+        return;
+    }
+
+    const QString oldVer = installed.installedVersion.isEmpty() ? tr("unknown") : installed.installedVersion;
+    auto response =
+        CustomMessageBox::selectable(this, tr("Update %1?").arg(installed.packName),
+                                     tr("This updates “%1” to <b>v%2</b> in place.<br>"
+                                        "Current: %3 · New: v%4<br>"
+                                        "Your saves and settings are kept; pack files are updated and old "
+                                        "versions of pack files are removed.")
+                                         .arg(installed.instanceName.toHtmlEscaped(), live->version.toHtmlEscaped(),
+                                              oldVer.toHtmlEscaped(), live->version.toHtmlEscaped()),
+                                     QMessageBox::Question, QMessageBox::Yes | QMessageBox::No)
+            ->exec();
+    if (response != QMessageBox::Yes) {
+        return;
+    }
+
+    // With original_instance_id set, the stock Modrinth import reuses the
+    // existing instance: files whose hash is unchanged are skipped, files
+    // the old pack installed and the new one dropped are removed, and the
+    // pack's overrides are re-applied. That is the whole update.
+    QMap<QString, QString> extra;
+    extra.insert("pack_id", live->name);
+    extra.insert("pack_version_id", live->version);
+    extra.insert("original_instance_id", inst->id());
+
+    auto* task = new InstanceImportTask(QUrl(live->download), true, this, extra);
+    task->setName(inst->name());
+    task->setGroup(APPLICATION->instances()->getInstanceGroup(inst->id()));
+    task->setIcon(inst->iconKey());
+    task->setConfirmUpdate(false);  // the user already clicked Update
+
+    auto job = Task::Ptr(APPLICATION->instances()->wrapInstanceTask(task));
+    connect(job.get(), &Task::failed, this, [](const QString& reason) {
+        CustomMessageBox::selectable(nullptr, QObject::tr("Update failed"), reason, QMessageBox::Critical)->show();
+    });
+    connect(job.get(), &Task::succeeded, this, [this, live, installed] {
+        CustomMessageBox::selectable(this, tr("Pack updated"),
+                                     tr("%1 is now on <b>v%2</b>.").arg(installed.packName.toHtmlEscaped(), live->version.toHtmlEscaped()),
+                                     QMessageBox::Information)
+            ->show();
+        refreshInstances();
+    });
+
+    ProgressDialog pg(this);
+    pg.showSkipButton();
+    pg.execWithTask(job.get());
 }
 
 void MainWindow::updateMainToolBar()

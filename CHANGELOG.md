@@ -6,6 +6,27 @@ All user-facing changes to the Blamdom Launcher.
 CI copies the matching `## <version>` section into the GitHub release notes,
 so a release without real notes means an entry was skipped.
 
+## 0.1.13 — 2026-11-22
+
+### Added
+
+- **Update your pack straight from the launcher window.** Right-click any
+  instance → **Blamdom pack → Update pack from Blamdom…**: the launcher
+  checks mine.blamdom.dev, tells you the current and new version, and
+  updates in place with one click — saves and settings are kept, unchanged
+  files are skipped, files the new pack dropped are removed. It also says
+  clearly when the instance is up to date or isn't one of our packs.
+
+### Fixed
+
+- **Installed packs are now recognized even when the launcher couldn't tell
+  what version you have.** Pack detection now falls back through the
+  instance's own settings and then its display name, so old installs (and
+  packs installed before the launcher tracked the version) still get the
+  "Update to v…" button in the Blamdom section instead of being treated as
+  "not installed yet". When the version is unknown, the status row says so
+  and the update still works.
+
 ## 0.1.12 — 2026-11-22
 
 ### Fixed
