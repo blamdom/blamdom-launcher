@@ -41,12 +41,6 @@
 
 namespace Blamdom {
 
-QString BlamdomAPI::normalizePackName(const QString& name)
-{
-    static const QRegularExpression s_title("\\s*\\(working title\\)$", QRegularExpression::CaseInsensitiveOption);
-    return name.trimmed().replace(s_title, QString()).trimmed().toLower();
-}
-
 const QString BlamdomAPI::PROD_URL = QStringLiteral("https://mine.blamdom.dev");
 
 std::pair<Task::Ptr, QByteArray*> BlamdomAPI::fetchPacks()

@@ -145,7 +145,12 @@ class BlamdomAPI final {
     //! Canonical form of a pack name for matching: trimmed, lowercased, with
     //! a trailing " (working title)" dropped (early builds used it, so old
     //! installs keep matching the same pack after the name settled).
-    static QString normalizePackName(const QString& name);
+    //! Pure — lives in the header so the catalog selftest can link it.
+    static QString normalizePackName(const QString& name)
+    {
+        static const QRegularExpression s_title(QStringLiteral("\\s*\\(working title\\)$"), QRegularExpression::CaseInsensitiveOption);
+        return name.trimmed().replace(s_title, QString()).trimmed().toLower();
+    }
 
     //! The (name, versionId) pair a modrinth.index.json body carries. Returns
     //! false if the object has no usable pack name; versionId may
