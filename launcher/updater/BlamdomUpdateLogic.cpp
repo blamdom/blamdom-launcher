@@ -463,7 +463,7 @@ bool extractZip(const QString& archive, const QString& destDir, QString* error)
         }
         const QString name = e.name.mid(slash + 1);
         if (name.isEmpty()) {
-            continue;  // the top-level folder's own directory entry (Info-ZIP writes one)
+            continue;  // the top-level folder's own directory entry (Info-ZIP/7-Zip write one)
         }
         if (name.contains(QLatin1String(".."))) {
             return fail(QStringLiteral("The update archive contains an invalid path."));

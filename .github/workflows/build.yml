@@ -65,6 +65,13 @@ jobs:
           cmake --build /tmp/updater-selftest
           QT_QPA_PLATFORM=offscreen /tmp/updater-selftest/selftest
 
+      - name: Blamdom catalog self-test (mod matching, versions, metadata round-trip)
+        run: |
+          export PATH=/opt/qt/6.9.3/gcc_64/bin:$PATH
+          cmake -S tests/blamdom-catalog -B /tmp/catalog-selftest -G Ninja -DCMAKE_PREFIX_PATH=/opt/qt/6.9.3/gcc_64
+          cmake --build /tmp/catalog-selftest
+          QT_QPA_PLATFORM=offscreen /tmp/catalog-selftest/selftest
+
       - name: Configure
         run: |
           cmake -B build -G Ninja \

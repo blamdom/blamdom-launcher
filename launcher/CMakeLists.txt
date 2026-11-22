@@ -501,6 +501,8 @@ set(API_SOURCES
 
     modplatform/blamdom/BlamdomAPI.h
     modplatform/blamdom/BlamdomAPI.cpp
+    modplatform/blamdom/ModUpdateTask.h
+    modplatform/blamdom/ModUpdateTask.cpp
 )
 
 set(FLAME_SOURCES

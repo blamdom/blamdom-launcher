@@ -17,6 +17,10 @@ Hasher::Ptr createHasher(QString file_path, ModPlatform::ResourceProvider provid
                                       ModPlatform::ProviderCapabilities::hashType(ModPlatform::ResourceProvider::MODRINTH).first());
         case ModPlatform::ResourceProvider::FLAME:
             return makeShared<Hasher>(file_path, Algorithm::Murmur2);
+        case ModPlatform::ResourceProvider::BLAMDOM:
+            // Our catalog pins jars with sha256
+            return makeShared<Hasher>(file_path,
+                                      ModPlatform::ProviderCapabilities::hashType(ModPlatform::ResourceProvider::BLAMDOM).first());
         default:
             qCritical() << "[Hashing]" << "Unrecognized mod platform!";
             return nullptr;

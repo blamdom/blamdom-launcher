@@ -187,6 +187,7 @@ int main(int argc, char** argv)
                                  "import zipfile, os, sys\n"
                                  "root, out = sys.argv[1], sys.argv[2]\n"
                                  "z = zipfile.ZipFile(out, 'w', zipfile.ZIP_DEFLATED)\n"
+                                 "z.write(os.path.join(root, 'blamdom-launcher-windows-x86_64'), 'blamdom-launcher-windows-x86_64/')\n"
                                  "for dirpath, dirnames, filenames in os.walk(root):\n"
                                  "    for fn in filenames:\n"
                                  "        p = os.path.join(dirpath, fn)\n"

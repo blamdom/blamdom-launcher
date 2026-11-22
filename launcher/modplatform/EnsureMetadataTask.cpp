@@ -126,6 +126,15 @@ void EnsureMetadataTask::executeTask()
         case (ModPlatform::ResourceProvider::FLAME):
             versionTask = flameVersionsTask();
             break;
+        case (ModPlatform::ResourceProvider::BLAMDOM):
+            // Our mods resolve against our own catalog (see BlamdomAPI), not
+            // against an API lookup — their metadata is already in place.
+            for (auto resource = m_resources.constBegin(); resource != m_resources.constEnd(); resource++) {
+                emitReady(resource.value());
+            }
+            m_resources.clear();
+            emitSucceeded();
+            return;
     }
 
     auto invalidadeLeftover = [this] {
@@ -137,6 +146,11 @@ void EnsureMetadataTask::executeTask()
         emitSucceeded();
     };
 
+    if (!versionTask) {
+        invalidadeLeftover();
+        return;
+    }
+
     connect(versionTask.get(), &Task::finished, this, [this, invalidadeLeftover] {
         Task::Ptr projectTask;
 
@@ -146,6 +160,8 @@ void EnsureMetadataTask::executeTask()
                 break;
             case (ModPlatform::ResourceProvider::FLAME):
                 projectTask = flameProjectsTask();
+                break;
+            case (ModPlatform::ResourceProvider::BLAMDOM):
                 break;
         }
 

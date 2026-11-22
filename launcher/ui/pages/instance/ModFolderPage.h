@@ -40,6 +40,8 @@
 
 #include <QPointer>
 #include "ExternalResourcesPage.h"
+#include "modplatform/packwiz/Packwiz.h"
+#include "tasks/Task.h"
 #include "ui/dialogs/ResourceDownloadDialog.h"
 
 class ModFolderPage : public ExternalResourcesPage {
@@ -72,10 +74,12 @@ class ModFolderPage : public ExternalResourcesPage {
     void deleteModMetadata();
     void exportModMetadata();
     void changeModVersion();
+    void changeBlamdomModVersion(const Packwiz::V1::Mod& meta);
 
    protected:
     ModFolderModel* m_model;
     QPointer<ResourceDownload::ResourceDownloadDialog> m_downloadDialog;
+    Task::Ptr m_blamdomUpdateJob;
 };
 
 class CoreModFolderPage : public ModFolderPage {

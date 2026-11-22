@@ -53,7 +53,10 @@
 #include <memory>
 
 #include "Application.h"
+#include "FileSystem.h"
 #include "Json.h"
+#include "modplatform/blamdom/BlamdomAPI.h"
+#include "modplatform/blamdom/ModUpdateTask.h"
 #include "settings/Setting.h"
 
 #include "ui/dialogs/CustomMessageBox.h"
@@ -261,7 +264,8 @@ void ModFolderPage::updateMods(bool includeDeps, std::vector<ModPlatform::Indexe
         modsList = m_model->allResources();
     }
 
-    ResourceUpdateDialog updateDialog(this, m_instance, m_model, modsList, includeDeps, profile->getModLoadersList(), std::move(releaseTypes));
+    ResourceUpdateDialog updateDialog(this, m_instance, m_model, modsList, includeDeps, profile->getModLoadersList(),
+                                      std::move(releaseTypes));
     updateDialog.checkCandidates();
 
     if (updateDialog.aborted()) {
@@ -356,12 +360,99 @@ void ModFolderPage::changeModVersion()
         return;
     }
 
+    const auto meta = modsList[0]->metadata();
+    if (meta->provider == ModPlatform::ResourceProvider::BLAMDOM) {
+        // Our own mods are not on Modrinth/CurseForge: check the catalog and
+        // update in place, no provider dialog.
+        changeBlamdomModVersion(*meta);
+        return;
+    }
+
     m_downloadDialog = ResourceDownload::ResourceDownloadDialog::createMod(this, m_model, m_instance, true);
     connect(this, &QObject::destroyed, m_downloadDialog, &QDialog::close);
     connect(m_downloadDialog, &QDialog::finished, this, &ModFolderPage::downloadDialogFinished);
 
     m_downloadDialog->setResourceMetadata((*modsList.begin())->metadata());
     m_downloadDialog->open();
+}
+
+void ModFolderPage::changeBlamdomModVersion(const Packwiz::V1::Mod& meta)
+{
+    if (m_blamdomUpdateJob) {
+        return;  // an update is already running
+    }
+
+    const QString modsDir = m_instance->modsRoot();
+    const QString oldPath = FS::PathCombine(modsDir, meta.filename);
+    if (!QFile::exists(oldPath)) {
+        CustomMessageBox::selectable(
+            this, tr("Error"),
+            tr("The file <b>%1</b> is not in the instance's mods folder — it may have been removed.").arg(meta.filename.toHtmlEscaped()),
+            QMessageBox::Critical)
+            ->show();
+        return;
+    }
+
+    if (!Blamdom::BlamdomAPI::catalogIsLoaded()) {
+        const auto mods = Blamdom::BlamdomAPI::fetchModsSync(this);
+        if (mods.isEmpty()) {
+            CustomMessageBox::selectable(this, tr("Blamdom mod"),
+                                         tr("Could not reach the Blamdom catalog. Check your connection and try again."),
+                                         QMessageBox::Warning)
+                ->show();
+            return;
+        }
+    }
+
+    const Blamdom::Mod* entry = nullptr;
+    for (const auto& m : Blamdom::BlamdomAPI::cachedMods()) {
+        if (m.id == meta.projectId.toString()) {
+            entry = &m;
+            break;
+        }
+    }
+    if (!entry) {
+        CustomMessageBox::selectable(
+            this, tr("Blamdom mod"),
+            tr("<b>%1</b> is no longer listed on our site — it keeps working as installed.").arg(meta.name.toHtmlEscaped()),
+            QMessageBox::Information)
+            ->show();
+        return;
+    }
+
+    const QString installedVer = Blamdom::BlamdomAPI::modFileVersion(entry->id, meta.filename);
+    if (!Blamdom::BlamdomAPI::isNewerVersion(entry->version, installedVer)) {
+        CustomMessageBox::selectable(this, tr("Blamdom mod"),
+                                     tr("<b>%1</b> is up to date (v%2).").arg(entry->name.toHtmlEscaped(), entry->version.toHtmlEscaped()),
+                                     QMessageBox::Information)
+            ->show();
+        return;
+    }
+
+    auto response =
+        CustomMessageBox::selectable(
+            this, tr("Update Blamdom mod?"),
+            tr("This updates <b>%1</b> from <b>v%2</b> to <b>v%3</b> in place.<br>The jar is verified against the sha256 in our catalog.")
+                .arg(entry->name.toHtmlEscaped(), installedVer.toHtmlEscaped(), entry->version.toHtmlEscaped()),
+            QMessageBox::Question, QMessageBox::Yes | QMessageBox::No)
+            ->exec();
+    if (response != QMessageBox::Yes) {
+        return;
+    }
+
+    m_blamdomUpdateJob = makeShared<Blamdom::ModUpdateTask>(*entry, oldPath, FS::PathCombine(modsDir, QStringLiteral(".index")));
+    QObject::connect(m_blamdomUpdateJob.get(), &Task::succeeded, this, [this]() {
+        m_blamdomUpdateJob.reset();
+        CustomMessageBox::selectable(this, tr("Mod updated"), tr("Your Blamdom mod was updated."), QMessageBox::Information)->show();
+    });
+    QObject::connect(m_blamdomUpdateJob.get(), &Task::failed, this, [this](const QString& reason) {
+        m_blamdomUpdateJob.reset();
+        CustomMessageBox::selectable(this, tr("Mod update failed"), reason, QMessageBox::Critical)->show();
+    });
+
+    ProgressDialog pg(this);
+    pg.showSkipButton();
+    pg.execWithTask(m_blamdomUpdateJob.get());
 }
 
 void ModFolderPage::exportModMetadata()

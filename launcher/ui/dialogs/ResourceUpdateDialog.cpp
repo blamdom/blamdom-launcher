@@ -20,6 +20,7 @@
 #include "minecraft/PackProfile.h"
 
 #include "modplatform/EnsureMetadataTask.h"
+#include "modplatform/blamdom/BlamdomAPI.h"
 #include "modplatform/flame/FlameCheckUpdate.h"
 #include "modplatform/modrinth/ModrinthCheckUpdate.h"
 
@@ -42,6 +43,8 @@ ModPlatform::ResourceProvider next(ModPlatform::ResourceProvider p)
             return ModPlatform::ResourceProvider::FLAME;
         case ModPlatform::ResourceProvider::FLAME:
             return ModPlatform::ResourceProvider::MODRINTH;
+        case ModPlatform::ResourceProvider::BLAMDOM:
+            return ModPlatform::ResourceProvider::FLAME;
     }
 
     return ModPlatform::ResourceProvider::FLAME;
@@ -236,8 +239,7 @@ void ResourceUpdateDialog::checkCandidates()
                     warnings = depTask->warnings();
                 }
                 if (warnings.count()) {
-                    CustomMessageBox::selectable(this, tr("Warnings"),
-                                                 warnings.join('\n') + "\nThe mod may not work correctly without it.",
+                    CustomMessageBox::selectable(this, tr("Warnings"), warnings.join('\n') + "\nThe mod may not work correctly without it.",
                                                  QMessageBox::Warning)
                         ->exec();
                 }
@@ -325,6 +327,9 @@ auto ResourceUpdateDialog::ensureMetadata() -> bool
             case ModPlatform::ResourceProvider::FLAME:
                 flameTmp.push_back(resource);
                 break;
+            case ModPlatform::ResourceProvider::BLAMDOM:
+                // Our mods are updated from the Blamdom section, not here.
+                break;
         }
     };
 
@@ -346,6 +351,17 @@ auto ResourceUpdateDialog::ensureMetadata() -> bool
         if (confirmRest) {
             addToTmp(candidate, providerRest);
             shouldTryOthers.insert(candidate->internalId(), tryOthersRest);
+            continue;
+        }
+
+        // Blamdom: our own mods resolve against our own catalog — we never
+        // prompt for them. (The catalog is fetched once, bounded; if it is
+        // unreachable, the stock prompt below remains the fallback.)
+        if (!Blamdom::BlamdomAPI::catalogIsLoaded() && !Blamdom::BlamdomAPI::catalogAttempted()) {
+            Blamdom::BlamdomAPI::fetchModsSync(this);
+        }
+        if (Blamdom::BlamdomAPI::resolveCandidate(candidate, indexDir2)) {
+            onMetadataEnsured(candidate);
             continue;
         }
 
@@ -433,6 +449,9 @@ void ResourceUpdateDialog::onMetadataEnsured(Resource* resource)
             break;
         case ModPlatform::ResourceProvider::FLAME:
             m_flameToUpdate.push_back(resource);
+            break;
+        case ModPlatform::ResourceProvider::BLAMDOM:
+            // Handled by the Blamdom section — no stock-provider update check.
             break;
     }
 }

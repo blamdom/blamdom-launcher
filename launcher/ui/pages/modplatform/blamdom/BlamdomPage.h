@@ -69,6 +69,23 @@ class BlamdomPage : public QWidget, public ModpackProviderBasePage {
     void suggestCurrent();
     void applyFilter();
 
+    //! Scan our installed pack instances: write Blamdom provider metadata for
+    //! our own mods found in their mods folders, and collect the ones that
+    //! are behind the live catalog.
+    void resolveLocalMods();
+    void updateModsStatus();
+    void runModUpdates();
+    void startNextModUpdate();
+
+    //! One installed mod file that the live catalog has moved past.
+    struct ModUpdate {
+        QString instanceId;
+        QString instanceName;
+        Blamdom::Mod mod;  //!< the catalog entry (latest version)
+        QString fileName;  //!< path of the installed file, relative to the mods folder
+        QString oldVersion;
+    };
+
     //! Which Java major a pack's Minecraft version needs (1.20.1 → 17, …).
     static int requiredJavaMajor(const QString& minecraft);
     //! True if the launcher knows a Java installation with this major.
@@ -86,6 +103,7 @@ class BlamdomPage : public QWidget, public ModpackProviderBasePage {
     void requestFailed(const QString& reason);
     void onUpdateButton_clicked();
     void onJavaButton_clicked();
+    void onModsUpdateButton_clicked();
 
    private:
     Ui::BlamdomPage* m_ui = nullptr;
@@ -94,6 +112,8 @@ class BlamdomPage : public QWidget, public ModpackProviderBasePage {
     QList<Blamdom::Pack> m_packs;
     QList<Blamdom::Mod> m_mods;
     QList<Blamdom::InstalledPack> m_installed;
+    QList<ModUpdate> m_modUpdates;
+    QList<ModUpdate> m_pendingMods;
 
     Blamdom::Pack m_selected;
     bool m_loaded = false;
@@ -102,4 +122,5 @@ class BlamdomPage : public QWidget, public ModpackProviderBasePage {
     Task::Ptr m_modsJob;
     Task::Ptr m_updateJob;
     Task::Ptr m_javaJob;
+    Task::Ptr m_modUpdateJob;
 };

@@ -23,6 +23,8 @@
 #include <QDebug>
 #include <QIODevice>
 
+#include "modplatform/blamdom/BlamdomAPI.h"
+
 namespace ModPlatform {
 
 ModLoaderType operator|(ModLoaderType lhs, ModLoaderType rhs)
@@ -51,6 +53,8 @@ const char* ProviderCapabilities::name(ResourceProvider p)
             return "modrinth";
         case ResourceProvider::FLAME:
             return "curseforge";
+        case ResourceProvider::BLAMDOM:
+            return "blamdom";
     }
     return {};
 }
@@ -62,6 +66,8 @@ QString ProviderCapabilities::readableName(ResourceProvider p)
             return "Modrinth";
         case ResourceProvider::FLAME:
             return "CurseForge";
+        case ResourceProvider::BLAMDOM:
+            return "Blamdom";
     }
     return {};
 }
@@ -74,12 +80,19 @@ QStringList ProviderCapabilities::hashType(ResourceProvider p)
         case ResourceProvider::FLAME:
             // Try newer formats first, fall back to old format
             return { "sha1", "md5", "murmur2" };
+        case ResourceProvider::BLAMDOM:
+            // Our manifests pin every jar with a sha256
+            return { "sha256" };
     }
     return {};
 }
 
 QString getMetaURL(ResourceProvider provider, QVariant projectID)
 {
+    if (provider == ModPlatform::ResourceProvider::BLAMDOM) {
+        // Our mods live on our own site: <base>/mods/<id>/
+        return Blamdom::BlamdomAPI::PROD_URL + "/mods/" + projectID.toString() + "/";
+    }
     return ((provider == ModPlatform::ResourceProvider::FLAME) ? "https://www.curseforge.com/projects/" : "https://modrinth.com/mod/") +
            projectID.toString();
 }

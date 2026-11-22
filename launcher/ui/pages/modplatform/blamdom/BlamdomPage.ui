@@ -164,7 +164,37 @@
      </property>
     </widget>
    </item>
-  </layout>
+   <item>
+    <layout class="QHBoxLayout" name="modsStatusLayout">
+     <item>
+      <widget class="QLabel" name="modsStatusLabel">
+       <property name="sizePolicy">
+        <sizepolicy hsizetype="Expanding" vsizetype="Preferred">
+         <horstretch>0</horstretch>
+         <verstretch>0</verstretch>
+        </sizepolicy>
+       </property>
+       <property name="text">
+        <string/>
+       </property>
+       <property name="wordWrap">
+        <bool>true</bool>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QPushButton" name="modsUpdateButton">
+       <property name="text">
+        <string>Update mod</string>
+       </property>
+       <property name="visible">
+        <bool>false</bool>
+       </property>
+      </widget>
+     </item>
+    </layout>
+   </item>
+   </layout>
  </widget>
  <customwidgets>
   <customwidget>
