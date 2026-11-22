@@ -30,7 +30,7 @@
 #include <QSysInfo>
 #include <QTemporaryFile>
 #include <QThread>
-#include <QZipReader>
+#include <zlib.h>
 #include <algorithm>
 
 namespace BlamdomUpdate {
@@ -285,6 +285,139 @@ QString pendingUpdateMarkerName()
     return QStringLiteral("PENDING-BLAMDOM-UPDATE");
 }
 
+namespace {
+
+// Minimal zip container reader (central-directory based). Enough for the release
+// archives we ship: per-entry deflate or stored, no zip64, no encryption.
+struct ZipEntry {
+    QString name;  // normalized to '/' separators
+    quint16 method = 0;
+    quint32 compSize = 0;
+    quint32 uncompSize = 0;
+    quint32 localOffset = 0;
+};
+
+inline quint16 zipU16(const QByteArray& d, int off)
+{
+    return static_cast<quint16>(static_cast<quint8>(d.at(off)) | (static_cast<quint8>(d.at(off + 1)) << 8));
+}
+
+inline quint32 zipU32(const QByteArray& d, int off)
+{
+    return static_cast<quint32>(static_cast<quint8>(d.at(off)) | (static_cast<quint8>(d.at(off + 1)) << 8)
+                                | (static_cast<quint8>(d.at(off + 2)) << 16) | (static_cast<quint8>(d.at(off + 3)) << 24));
+}
+
+bool readZipEntries(const QByteArray& data, QList<ZipEntry>& out, QString* error)
+{
+    auto fail = [error](const QString& msg) {
+        if (error) {
+            *error = msg;
+        }
+        return false;
+    };
+    // End of central directory record: scan back from the end (22 bytes + any comment).
+    int eocd = -1;
+    const int minPos = data.size() > 22 ? data.size() - 22 - 65536 : 0;
+    const auto sig = QByteArray::fromHex("504b0506");
+    for (int i = data.size() - 22; i >= minPos && i >= 0; --i) {
+        if (data.mid(i, 4) == sig) {
+            eocd = i;
+            break;
+        }
+    }
+    if (eocd < 0) {
+        return fail(QStringLiteral("Not a zip archive."));
+    }
+    // EOCD layout: sig(4) disk(2) cdDisk(2) countThisDisk(2) countTotal(2) cdSize(4) cdOffset(4) commentLen(2)
+    const quint16 count = zipU16(data, eocd + 10);
+    const quint32 cdOffset = zipU32(data, eocd + 16);
+    if (count == 0xFFFFu || cdOffset == 0xFFFFFFFFu) {
+        return fail(QStringLiteral("Zip64 archives are not supported."));
+    }
+    int pos = static_cast<int>(cdOffset);
+    const auto cdSig = QByteArray::fromHex("504b0102");
+    for (quint32 i = 0; i < count; ++i) {
+        if (pos < 0 || pos + 46 > data.size() || data.mid(pos, 4) != cdSig) {
+            return fail(QStringLiteral("Corrupt central directory."));
+        }
+        ZipEntry e;
+        e.method = zipU16(data, pos + 10);
+        e.compSize = zipU32(data, pos + 20);
+        e.uncompSize = zipU32(data, pos + 24);
+        e.localOffset = zipU32(data, pos + 42);
+        if (e.compSize == 0xFFFFFFFFu || e.uncompSize == 0xFFFFFFFFu || e.localOffset == 0xFFFFFFFFu) {
+            return fail(QStringLiteral("Zip64 archives are not supported."));
+        }
+        const quint16 nameLen = zipU16(data, pos + 28);
+        const quint16 extraLen = zipU16(data, pos + 30);
+        const quint16 commentLen = zipU16(data, pos + 32);
+        if (pos + 46 + nameLen > data.size()) {
+            return fail(QStringLiteral("Corrupt archive."));
+        }
+        e.name = QString::fromUtf8(data.mid(pos + 46, nameLen));
+        e.name.replace('\\', '/');  // some writers (e.g. PowerShell) use backslashes
+        if (e.name.isEmpty()) {
+            return fail(QStringLiteral("Archive contains an unnamed entry."));
+        }
+        out.append(e);
+        pos += 46 + nameLen + extraLen + commentLen;
+    }
+    return true;
+}
+
+bool zipEntryData(const QByteArray& data, const ZipEntry& e, QByteArray& out, QString* error)
+{
+    auto fail = [error](const QString& msg) {
+        if (error) {
+            *error = msg;
+        }
+        return false;
+    };
+    const int lh = static_cast<int>(e.localOffset);
+    if (lh < 0 || lh + 30 > data.size() || data.mid(lh, 4) != QByteArray::fromHex("504b0304")) {
+        return fail(QStringLiteral("Corrupt local file header."));
+    }
+    const int start = lh + 30 + zipU16(data, lh + 26) + zipU16(data, lh + 28);
+    if (start < 0 || start + static_cast<int>(e.compSize) > data.size()) {
+        return fail(QStringLiteral("Corrupt archive (entry data out of bounds)."));
+    }
+    const QByteArray payload = data.mid(start, e.compSize);
+    if (e.method == 0) {  // stored
+        out = payload;
+    } else if (e.method == 8) {  // deflate
+        z_stream strm {};
+        if (inflateInit2(&strm, -15) != Z_OK) {  // -15: raw deflate stream (no zlib header)
+            return fail(QStringLiteral("Could not initialize decompression."));
+        }
+        strm.next_in = reinterpret_cast<Bytef*>(const_cast<char*>(payload.constData()));
+        strm.avail_in = static_cast<uInt>(payload.size());
+        QByteArray inflated;
+        char buf[32768];
+        int rc = Z_OK;
+        do {
+            strm.next_out = reinterpret_cast<Bytef*>(buf);
+            strm.avail_out = sizeof(buf);
+            rc = inflate(&strm, Z_NO_FLUSH);
+            if (rc != Z_OK && rc != Z_STREAM_END && rc != Z_BUF_ERROR) {
+                inflateEnd(&strm);
+                return fail(QStringLiteral("Could not decompress %1.").arg(e.name));
+            }
+            inflated.append(buf, static_cast<int>(sizeof(buf) - strm.avail_out));
+        } while (rc != Z_STREAM_END);
+        inflateEnd(&strm);
+        if (static_cast<quint32>(inflated.size()) != e.uncompSize) {
+            return fail(QStringLiteral("Decompressed size mismatch for %1.").arg(e.name));
+        }
+        out = inflated;
+    } else {
+        return fail(QStringLiteral("Unsupported compression method %1 in %2.").arg(e.method).arg(e.name));
+    }
+    return true;
+}
+
+}  // namespace
+
 bool extractZip(const QString& archive, const QString& destDir, QString* error)
 {
     auto fail = [error](const QString& msg) {
@@ -293,24 +426,26 @@ bool extractZip(const QString& archive, const QString& destDir, QString* error)
         }
         return false;
     };
-    QZipReader zip(archive);
-    if (zip.hasError()) {
-        return fail(QStringLiteral("Could not open the update archive: %1").arg(zip.errorString()));
+    QFile f(archive);
+    if (!f.open(QIODevice::ReadOnly)) {
+        return fail(QStringLiteral("Could not open the update archive: %1").arg(f.errorString()));
     }
-    const auto infos = zip.fileInfos();
+    const QByteArray data = f.readAll();
+    QList<ZipEntry> entries;
+    if (!readZipEntries(data, entries, error)) {
+        return false;
+    }
     // Our zips (like the release zips) have exactly one top-level folder; find it.
-    // PowerShell Compress-Archive writes backslash separators, so normalize first.
     QString top;
-    for (const auto& fi : infos) {
-        const QString name = fi.name().replace('\\', '/');
-        const int slash = name.indexOf('/');
+    for (const auto& e : entries) {
+        const int slash = e.name.indexOf('/');
         if (slash < 0) {
-            if (fi.isFile()) {
+            if (!e.name.endsWith('/')) {
                 return fail(QStringLiteral("The update archive has files outside a top-level folder."));
             }
             continue;
         }
-        const QString first = name.left(slash);
+        const QString first = e.name.left(slash);
         if (top.isEmpty()) {
             top = first;
         } else if (first != top) {
@@ -321,36 +456,30 @@ bool extractZip(const QString& archive, const QString& destDir, QString* error)
         return fail(QStringLiteral("The update archive is empty."));
     }
     QDir dest(destDir);
-    for (const auto& fi : infos) {
-        QString name = fi.name().replace('\\', '/');
-        const int slash = name.indexOf('/');
+    for (const auto& e : entries) {
+        const int slash = e.name.indexOf('/');
         if (slash < 0) {
             continue;  // the top-level folder entry itself
         }
-        name = name.mid(slash + 1);
+        const QString name = e.name.mid(slash + 1);
         if (name.isEmpty() || name.contains(QLatin1String(".."))) {
             return fail(QStringLiteral("The update archive contains an invalid path."));
         }
         const QString target = destDir + QLatin1Char('/') + name;
-        if (fi.isDir()) {
+        if (e.name.endsWith('/')) {
             dest.mkpath(target);
-        } else if (fi.isFile()) {
-            QDir().mkpath(QFileInfo(target).absolutePath());
-            QIODevice* in = zip.open(fi);
-            if (!in) {
-                return fail(QStringLiteral("Could not read %1 from the archive.").arg(name));
-            }
-            {
-                QFile out(target);
-                if (!out.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
-                    delete in;
-                    return fail(QStringLiteral("Could not write %1.").arg(name));
-                }
-                out.write(in->readAll());
-                out.close();
-            }
-            delete in;
+            continue;
         }
+        QByteArray content;
+        if (!zipEntryData(data, e, content, error)) {
+            return false;
+        }
+        QDir().mkpath(QFileInfo(target).absolutePath());
+        QFile out(target);
+        if (!out.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+            return fail(QStringLiteral("Could not write %1.").arg(name));
+        }
+        out.write(content);
     }
     return true;
 }
@@ -507,7 +636,7 @@ bool relaunchLater(const QString& exePath, int delaySeconds, QString* error)
     const QString path = f->fileName();
     f->setAutoRemove(false);
     f->deleteLater();  // the file itself stays until the OS cleans the temp dir
-    if (!QProcess::startDetached(process, processArgs + { path })) {
+    if (!QProcess::startDetached(process, processArgs + QStringList{ path })) {
         if (error) {
             *error = QStringLiteral("Could not start the relaunch script %1").arg(path);
         }

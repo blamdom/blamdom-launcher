@@ -190,7 +190,7 @@ int main(int argc, char** argv)
                                  "for dirpath, dirnames, filenames in os.walk(root):\n"
                                  "    for fn in filenames:\n"
                                  "        p = os.path.join(dirpath, fn)\n"
-                                 "        z.write(p, os.path.relpath(p, os.path.dirname(root)))\n"
+                                 "        z.write(p, os.path.relpath(p, root))\n"
                                  "z.close()\n",
                                  root + "/zpkg",
                                  root + "/update.zip" });
@@ -200,6 +200,9 @@ int main(int argc, char** argv)
     }
     const QString zstaged = root + "/zipapp";
     CHECK(extractZip(root + "/update.zip", zstaged, &err));
+    // zip extraction does not restore unix permission bits (irrelevant on Windows, the only
+    // platform that uses this path) - mark the fake exe so validateStaged can check it
+    QFile(zstaged + "/app.exe").setPermissions(QFile::permissions(zstaged + "/app.exe") | QFileDevice::ExeUser);
     CHECK(read(zstaged + "/app.exe") == "MZ-new");
     CHECK(read(zstaged + "/jars/JavaCheck.jar") == "jar-new");
     CHECK(read(zstaged + "/jars/NewLaunch.jar") == "jar-new2");
@@ -207,6 +210,22 @@ int main(int argc, char** argv)
     CHECK(validateStaged(zstaged, "app.exe", &err));
     CHECK(!extractZip(root + "/update.tar.gz", root + "/zipjunk", &err));      // not a zip -> clean failure
     CHECK(!extractZip(root + "/blob.bin", root + "/zipjunk2", &err));          // junk -> clean failure
+    // backslash entry names (as written by some tools) are normalized to paths
+    {
+        QProcess z;
+        z.start("python3", { "-c",
+                             "import zipfile, sys\n"
+                             "z = zipfile.ZipFile(sys.argv[1], 'w', zipfile.ZIP_DEFLATED)\n"
+                             "zi = zipfile.ZipInfo('blamdom-launcher-windows-x86_64\\\\nested\\\\app.exe')\n"
+                             "zi.compress_type = zipfile.ZIP_DEFLATED\n"
+                             "z.writestr(zi, 'MZ-backslash')\n"
+                             "z.close()\n",
+                             root + "/backslash.zip" });
+        CHECK(z.waitForFinished(20000) && z.exitCode() == 0);
+        const QString bdest = root + "/zipback";
+        CHECK(extractZip(root + "/backslash.zip", bdest, &err));
+        CHECK(read(bdest + "/nested/app.exe") == "MZ-backslash");
+    }
 
     // ---- Windows update bootstrap (the folder surgery)
     // "win" is the canonical install dir; a staged sibling with a marker waits to take over
@@ -216,7 +235,7 @@ int main(int argc, char** argv)
     write(wstaged + "/app.exe", "MZ-new");
     write(wstaged + "/lib.dll", "dll-new");
     write(wstaged + "/new.dll", "dll-added");
-    write(wstaged + "/" + pendingUpdateMarkerName(), root + "/win\n");
+    write(wstaged + "/" + pendingUpdateMarkerName(), (root + "/win\n").toUtf8());
     {
         QString relaunchExe;
         CHECK(applyPendingUpdate(wstaged, "app.exe", &relaunchExe, &err) == UpdateBootstrap::Completed);
@@ -230,7 +249,7 @@ int main(int argc, char** argv)
     // a pending sibling seen from the canonical dir asks for a relaunch into it
     write(root + "/win/app.exe", "MZ-old2");
     write(root + "/win.update/app.exe", "MZ-old3");
-    write(root + "/win.update/" + pendingUpdateMarkerName(), root + "/win\n");
+    write(root + "/win.update/" + pendingUpdateMarkerName(), (root + "/win\n").toUtf8());
     {
         QString relaunchExe;
         CHECK(applyPendingUpdate(root + "/win", "app.exe", &relaunchExe, &err) == UpdateBootstrap::RelaunchNeeded);
