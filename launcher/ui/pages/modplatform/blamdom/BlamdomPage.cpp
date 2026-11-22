@@ -109,6 +109,12 @@ void BlamdomPage::retranslate()
 
 void BlamdomPage::openedImpl()
 {
+    // Re-fetch on every open: releases publish while the launcher runs, and
+    // keeping the first session's catalog would hide them until a restart
+    // (the documented contract is "fetched fresh on every open of the page").
+    if (m_loaded) {
+        m_loaded = false;
+    }
     refresh();
 }
 

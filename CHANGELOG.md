@@ -6,6 +6,17 @@ All user-facing changes to the Blamdom Launcher.
 CI copies the matching `## <version>` section into the GitHub release notes,
 so a release without real notes means an entry was skipped.
 
+## 0.1.12 — 2026-11-22
+
+### Fixed
+
+- **Blamdom section now shows fresh releases without a restart.** The pack
+  and mod manifests were only fetched once per launcher session (when the
+  Blamdom section was first opened), so a release published while the
+  launcher was running stayed invisible — the section kept showing the old
+  pack/mod versions forever. The section now re-fetches every time it is
+  opened, matching the documented "fetched fresh on every open" contract.
+
 ## 0.1.11 — 2026-11-22
 
 ### Added
