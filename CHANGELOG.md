@@ -6,6 +6,30 @@ All user-facing changes to the Blamdom Launcher.
 CI copies the matching `## <version>` section into the GitHub release notes,
 so a release without real notes means an entry was skipped.
 
+## 0.1.11 — 2026-11-22
+
+### Added
+
+- **Our mods are now first-class citizens.** Mods we publish on our site
+  (Cozy Quests, Cozy Fixes, …) are recognized automatically: fresh pack
+  imports tag them with the **Blamdom** provider in the mod list instead of
+  "Unknown", existing installs get the same when the Blamdom section is
+  opened, and the launcher never asks you to "choose a mod provider" for
+  them — the provider dialog stays for genuinely unknown mods only.
+- **In-place updates for our mods.** When a new version of one of our mods is
+  posted to the site, the Blamdom section shows it ("Update N mods to latest")
+  and updates it in place — the jar is verified against the sha256 in our
+  catalog before it replaces the old one, and a crash mid-update can never
+  lose your current jar. You can also update a single mod from its
+  "Change version" button in the mod list.
+
+### Fixed
+
+- **Self-update archive extraction.** Launcher self-updates (v0.1.10) rejected
+  update archives made with common zip tools (Info-ZIP, 7-Zip, …) because of
+  a directory entry such tools write for the top-level folder. Those archives
+  now extract correctly; the update check itself was unaffected.
+
 ## 0.1.10 — 2026-11-21
 
 ### Added
