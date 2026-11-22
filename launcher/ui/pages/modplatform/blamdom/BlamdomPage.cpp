@@ -20,11 +20,15 @@
 #include "ui_BlamdomPage.h"
 
 #include <QAbstractItemView>
+#include <QDirIterator>
+#include <QFileInfo>
 #include <QItemSelectionModel>
 #include <QMap>
 #include <QMessageBox>
 #include <QStandardItemModel>
 #include <QUrl>
+
+#include <functional>
 
 #include "Application.h"
 #include "FileSystem.h"
@@ -37,6 +41,10 @@
 #include "meta/Index.h"
 #include "meta/VersionList.h"
 #include "minecraft/VersionFile.h"
+#include "minecraft/mod/MetadataHandler.h"
+#include "modplatform/blamdom/ModUpdateTask.h"
+#include "net/ApiRequest.h"
+#include "net/ChecksumValidator.h"
 #include "net/NetJob.h"
 #include "ui/dialogs/CustomMessageBox.h"
 #include "ui/dialogs/NewInstanceDialog.h"
@@ -53,6 +61,15 @@ QByteArray humanSize(qint64 bytes)
         return QStringLiteral("%1 KB").arg(QString::number(bytes / 1024.0, 'f', 0)).toUtf8();
     }
     return QStringLiteral("%1 B").arg(bytes).toUtf8();
+}
+
+//! Recursively visit every file under a mods folder.
+void forModsFiles(const QString& dir, const std::function<void(const QFileInfo&)>& fn)
+{
+    QDirIterator it(dir, QDir::Files | QDir::Dirs | QDir::NoDotAndDotDot);
+    while (it.hasNext()) {
+        fn(it.nextFileInfo());
+    }
 }
 
 }  // namespace
@@ -73,6 +90,7 @@ BlamdomPage::BlamdomPage(NewInstanceDialog* dialog, QWidget* parent) : QWidget(p
     // No connectSlotsByName here — wire the status-row buttons explicitly.
     connect(m_ui->updateButton, &QPushButton::clicked, this, &BlamdomPage::onUpdateButton_clicked);
     connect(m_ui->javaButton, &QPushButton::clicked, this, &BlamdomPage::onJavaButton_clicked);
+    connect(m_ui->modsUpdateButton, &QPushButton::clicked, this, &BlamdomPage::onModsUpdateButton_clicked);
 }
 
 BlamdomPage::~BlamdomPage()
@@ -137,12 +155,20 @@ void BlamdomPage::packsLoaded(QByteArray* response)
     if (m_packs.isEmpty()) {
         m_ui->packDescription->setHtml(tr("<p>No packs published yet.</p>"));
     }
+    if (!m_mods.isEmpty()) {
+        resolveLocalMods();
+    }
 }
 
 void BlamdomPage::modsLoaded(QByteArray* response)
 {
     m_modsJob.reset();
-    m_mods = Blamdom::BlamdomAPI::parseMods(std::move(*response));
+    const QByteArray raw = std::move(*response);
+    m_mods = Blamdom::BlamdomAPI::parseMods(raw);
+    // Keep the shared in-memory catalog in sync with what the page shows, so
+    // other code paths (pack import, the update-check dialog) resolve our mods
+    // without fetching again.
+    Blamdom::BlamdomAPI::setCachedMods(raw);
 
     if (m_mods.isEmpty()) {
         m_ui->modsText->setHtml(tr("<p>No mods published yet.</p>"));
@@ -158,6 +184,10 @@ void BlamdomPage::modsLoaded(QByteArray* response)
             QStringLiteral("<a href=\"%1\">%2</a> · %3</p><hr>").arg(m.download, tr("download"), QString::fromUtf8(humanSize(m.sizeBytes)));
     }
     m_ui->modsText->setHtml(html);
+
+    if (m_loaded) {
+        resolveLocalMods();
+    }
 }
 
 void BlamdomPage::requestFailed(const QString& reason)
@@ -398,6 +428,185 @@ void BlamdomPage::runUpdate(const Blamdom::InstalledPack& installed)
     pg.showSkipButton();
     pg.execWithTask(m_updateJob.get());
     m_updateJob.reset();
+}
+
+void BlamdomPage::resolveLocalMods()
+{
+    m_modUpdates.clear();
+    if (m_mods.isEmpty() || m_installed.isEmpty()) {
+        updateModsStatus();
+        return;
+    }
+
+    for (const auto& ip : m_installed) {
+        auto* inst = APPLICATION->instances()->getInstanceById(ip.instanceId);
+        if (!inst) {
+            continue;
+        }
+        const QString modsDir = inst->modsRoot();
+        QDir mods(modsDir);
+        if (!mods.exists()) {
+            continue;
+        }
+        const QDir indexDir(FS::PathCombine(modsDir, ".index"));
+
+        // Sweep temp names left behind by a crashed mod update (the old jar
+        // itself is never lost — these are just the staging/backup names).
+        forModsFiles(modsDir, [](const QFileInfo& entry) {
+            const QString fn = entry.fileName();
+            if (fn.endsWith(QStringLiteral(".update-new")) || fn.endsWith(QStringLiteral(".update-old"))) {
+                QFile::remove(entry.filePath());
+            }
+        });
+
+        forModsFiles(modsDir, [&](const QFileInfo& entry) {
+            const auto* mod = Blamdom::BlamdomAPI::matchModFile(m_mods, entry.fileName());
+            if (!mod) {
+                return;
+            }
+
+            // (a) Our own mod with no (or a foreign) provider entry: write the
+            //     Blamdom metadata so the mod list shows "Blamdom", never "Unknown".
+            auto meta = Metadata::get(indexDir, mod->id);
+            if (!meta.isValid() || meta.provider != ModPlatform::ResourceProvider::BLAMDOM) {
+                meta = Blamdom::BlamdomAPI::buildModMetadata(*mod, entry.fileName());
+                Blamdom::BlamdomAPI::writeModMetadata(indexDir, meta);
+            }
+
+            // (b) Installed file behind the live catalog?
+            const QString installedVer = Blamdom::BlamdomAPI::modFileVersion(mod->id, entry.fileName());
+            if (Blamdom::BlamdomAPI::isNewerVersion(mod->version, installedVer)) {
+                ModUpdate up;
+                up.instanceId = inst->id();
+                up.instanceName = inst->name();
+                up.mod = *mod;
+                up.fileName = mods.relativeFilePath(entry.filePath());
+                up.oldVersion = installedVer;
+                m_modUpdates.append(up);
+            }
+        });
+    }
+    updateModsStatus();
+}
+
+void BlamdomPage::updateModsStatus()
+{
+    m_ui->modsUpdateButton->setVisible(false);
+    if (m_modUpdates.isEmpty()) {
+        if (m_installed.isEmpty()) {
+            m_ui->modsStatusLabel->clear();
+        } else {
+            m_ui->modsStatusLabel->setText(tr("Our mods are up to date on your installed packs."));
+        }
+        return;
+    }
+
+    QStringList lines;
+    for (const auto& up : m_modUpdates) {
+        lines << tr("%1 on “%2”: v%3 → v%4")
+                     .arg(up.mod.name.toHtmlEscaped(), up.instanceName.toHtmlEscaped(),
+                          up.oldVersion.isEmpty() ? QStringLiteral("?") : up.oldVersion.toHtmlEscaped(), up.mod.version.toHtmlEscaped());
+    }
+    m_ui->modsStatusLabel->setText(tr("<b>Updates available:</b> %1").arg(lines.join(QStringLiteral(" · "))));
+    m_ui->modsUpdateButton->setVisible(true);
+    if (m_modUpdates.size() == 1) {
+        m_ui->modsUpdateButton->setText(tr("Update %1 to v%2").arg(m_modUpdates.first().mod.name, m_modUpdates.first().mod.version));
+    } else {
+        m_ui->modsUpdateButton->setText(tr("Update %1 mods to latest").arg(m_modUpdates.size()));
+    }
+}
+
+void BlamdomPage::onModsUpdateButton_clicked()
+{
+    if (m_modUpdates.isEmpty() || m_modUpdateJob) {
+        return;
+    }
+
+    QString what;
+    if (m_modUpdates.size() == 1) {
+        what = tr("This updates <b>%1</b> to <b>v%2</b> in place.<br>Jar is verified against the sha256 in our catalog.")
+                   .arg(m_modUpdates.first().mod.name.toHtmlEscaped(), m_modUpdates.first().mod.version.toHtmlEscaped());
+    } else {
+        QStringList lines;
+        for (const auto& up : m_modUpdates) {
+            lines << tr("%1 (v%2 → v%3)").arg(up.mod.name).arg(up.oldVersion).arg(up.mod.version);
+        }
+        what = tr("This updates <b>%1</b> mods in place:<br>%2<br>Each jar is verified against the sha256 in our catalog.")
+                   .arg(m_modUpdates.size())
+                   .arg(lines.join(QStringLiteral("<br>")));
+    }
+
+    auto response =
+        CustomMessageBox::selectable(this, tr("Update Blamdom mods?"), what, QMessageBox::Question, QMessageBox::Yes | QMessageBox::No)
+            ->exec();
+    if (response != QMessageBox::Yes) {
+        return;
+    }
+    runModUpdates();
+}
+
+void BlamdomPage::runModUpdates()
+{
+    m_pendingMods = m_modUpdates;
+    m_ui->modsUpdateButton->setEnabled(false);
+    startNextModUpdate();
+}
+
+void BlamdomPage::startNextModUpdate()
+{
+    if (m_pendingMods.isEmpty()) {
+        m_modUpdateJob.reset();
+        m_ui->modsUpdateButton->setEnabled(true);
+        m_ui->modsStatusLabel->setText(tr("Our mods are up to date."));
+        m_modUpdates.clear();
+        CustomMessageBox::selectable(this, tr("Mods updated"), tr("Your Blamdom mods are up to date."), QMessageBox::Information)->show();
+        return;
+    }
+
+    auto up = m_pendingMods.takeFirst();
+
+    auto* inst = APPLICATION->instances()->getInstanceById(up.instanceId);
+    const QString modsDir = inst ? inst->modsRoot() : QString();
+    const QString oldPath = FS::PathCombine(modsDir, up.fileName);
+
+    if (!inst || !QFile::exists(oldPath)) {
+        m_ui->modsStatusLabel->setText(tr("Update failed: the installed file of %1 is missing.").arg(up.mod.name.toHtmlEscaped()));
+        CustomMessageBox::selectable(this, tr("Mod update failed"),
+                                     tr("Could not find <b>%1</b> in the instance “%2” — it may have been removed.")
+                                         .arg(up.mod.name.toHtmlEscaped(), up.instanceName.toHtmlEscaped()),
+                                     QMessageBox::Critical)
+            ->show();
+        m_pendingMods.clear();
+        m_ui->modsUpdateButton->setEnabled(true);
+        return;
+    }
+
+    m_ui->modsStatusLabel->setText(
+        tr("Updating <b>%1</b> to <b>v%2</b>…").arg(up.mod.name.toHtmlEscaped(), up.mod.version.toHtmlEscaped()));
+    m_ui->modsUpdateButton->setEnabled(false);
+
+    m_modUpdateJob = makeShared<Blamdom::ModUpdateTask>(up.mod, oldPath, FS::PathCombine(modsDir, QStringLiteral(".index")));
+    QObject::connect(m_modUpdateJob.get(), &Task::failed, this, [this, up](const QString& reason) {
+        m_modUpdateJob.reset();
+        m_ui->modsStatusLabel->setText(tr("Update failed: %1").arg(reason.toHtmlEscaped()));
+        CustomMessageBox::selectable(this, tr("Mod update failed"), reason, QMessageBox::Critical)->show();
+        m_pendingMods.clear();
+        m_ui->modsUpdateButton->setEnabled(true);
+    });
+    QObject::connect(m_modUpdateJob.get(), &Task::succeeded, this, [this, up]() {
+        m_modUpdateJob.reset();
+        m_ui->modsStatusLabel->setText(tr("%1 is now on <b>v%2</b>.").arg(up.mod.name.toHtmlEscaped(), up.mod.version.toHtmlEscaped()));
+        startNextModUpdate();
+    });
+    QObject::connect(m_modUpdateJob.get(), &Task::aborted, this, [this]() {
+        m_modUpdateJob.reset();
+        m_pendingMods.clear();
+        m_ui->modsUpdateButton->setEnabled(true);
+    });
+
+    ProgressDialog pg(this);
+    pg.showSkipButton();
+    pg.execWithTask(m_modUpdateJob.get());
 }
 
 void BlamdomPage::onJavaButton_clicked()
